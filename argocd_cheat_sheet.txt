@@ -1,0 +1,137 @@
+================================================================================
+                    ARGOCD & GITOOPS INTERVIEW CHEAT SHEET
+================================================================================
+
+Argo CD is a declarative, GitOps continuous delivery tool for Kubernetes that
+automates the deployment of applications by syncing Git state to the cluster.
+
+
+--------------------------------------------------------------------------------
+1. CORE ARCHITECTURAL COMPONENTS
+--------------------------------------------------------------------------------
+
+Component               1-line Description
+--------------------------------------------------------------------------------
+API Server              gRPC/REST server exposing Web UI, CLI, and webhook triggers.
+Repository Server       Internal service caching Git repos & rendering K8s manifests.
+Application Controller  K8s controller continuously reconciling Git vs live cluster.
+Redis                   Caching engine used for parsed manifests and cluster state.
+Dex                     Optional embedded OpenID Connect (OIDC) identity provider.
+Notifications Engine    Dispatches alerts (Slack, email, Webhooks) on sync events.
+
+
+--------------------------------------------------------------------------------
+2. ESSENTIAL ARGOCD CUSTOM RESOURCE DEFINITIONS (CRDs)
+--------------------------------------------------------------------------------
+
+CRD                     1-line Description
+--------------------------------------------------------------------------------
+Application             Binds a single Git source repo/path to a target K8s cluster/namespace.
+AppProject              Logical grouping defining access controls, allowed repos & clusters.
+ApplicationSet          Automates multi-cluster & multi-repo Application generation at scale.
+
+
+--------------------------------------------------------------------------------
+3. APPLICATION SYNC & HEALTH STATES
+--------------------------------------------------------------------------------
+
+Sync Status (Git vs Cluster comparison):
+  * Synced          -> Live cluster state matches the target Git commit exactly.
+  * OutOfSync       -> Differences exist between Git and live cluster manifests.
+
+Health Status (Runtime Pod/Resource status):
+  * Healthy         -> All resources are running and ready (e.g., Pods running 1/1).
+  * Progressing     -> Workloads in rollout/update state (e.g., pulling images, scaling).
+  * Degraded        -> Resources failed (e.g., CrashLoopBackOff, failed PVC binding).
+  * Missing         -> Manifest exists in Git but is absent in the live cluster.
+  * Suspended       -> Workload execution paused (e.g., paused CronJob or rollout).
+
+
+--------------------------------------------------------------------------------
+4. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * Pull-based GitOps (Argo CD) vs Push-based CI/CD (Jenkins / GitLab CI):
+    - Push-based -> CI runner holds cluster credentials and pushes changes via `kubectl`.
+    - Pull-based -> Agent lives inside cluster, pulls from Git, eliminating external creds.
+
+  * Application vs ApplicationSet:
+    - Application    -> Manages a single app instance in a specific cluster/namespace.
+    - ApplicationSet -> Generates multiple Applications automatically using generators
+                        (List, Cluster, Git Directory/File, Pull Request).
+
+  * Self-Healing vs Auto-Sync:
+    - Auto-Sync    -> Automatically triggers deployment when new commits land in Git.
+    - Self-Healing -> Automatically overrides/reverts manual changes made directly in cluster.
+
+  * Pruning (SyncOptions = Prune):
+    - Enabled  -> Deletes cluster resources when their YAML is removed from Git.
+    - Disabled -> Leaves orphaned resources running in cluster if deleted from Git.
+
+    >> One-Line Answer (What is Argo CD?):
+       "Argo CD is a Kubernetes controller that enforces Git as the single source
+        of truth, continuously reconciling live cluster state against Git manifests."
+
+
+--------------------------------------------------------------------------------
+5. GITOPS RECONCILIATION & SYNC LIFECYCLE
+--------------------------------------------------------------------------------
+
+      +-------------------+
+      |   Git Repository  | <--- Single Source of Truth
+      +-------------------+
+                │
+                │ Webhook / Poll (default 3m)
+                v
+      +-------------------+
+      | Argo CD API / Rep | <--- Manifest Templating (Helm, Kustomize)
+      +-------------------+
+                │
+                │ Compare (Git vs K8s API)
+                v
+      +-------------------+
+      | App Controller    | <--- Detects OutOfSync / Degraded
+      +-------------------+
+                │
+                │ Auto-Sync / Self-Heal
+                v
+      +-------------------+
+      | K8s Live Cluster  | <--- Live State matches Git
+      +-------------------+
+
+
+--------------------------------------------------------------------------------
+6. ESSENTIAL ARGOCD CLI (argocd) COMMANDS
+--------------------------------------------------------------------------------
+
+Command                                1-line Description
+--------------------------------------------------------------------------------
+argocd login <server>                  Authenticate against Argo CD API server.
+argocd app list                        List all Applications and their sync/health statuses.
+argocd app get <app-name>              Show detailed tree, manifests, and event history.
+argocd app sync <app-name>             Manually trigger synchronization from Git to cluster.
+argocd app sync <app> --prune          Sync application and delete removed resources.
+argocd app history <app-name>          Display deployment commit history and rollback IDs.
+argocd app rollback <app-name> <id>    Rollback application to a previously synced ID.
+argocd app diff <app-name>             Show live unified diff between Git and live cluster.
+argocd repo add <repo-url>             Register Git or Helm repository credentials.
+argocd cluster add <context-name>      Register target external Kubernetes cluster.
+
+
+--------------------------------------------------------------------------------
+7. ADVANCED INTERVIEW TOPICS: SYNC WAVES & PHASES
+--------------------------------------------------------------------------------
+
+Sync Phases:
+  * PreSync   -> Executes setup tasks (DB migration Jobs, backup) before main sync.
+  * Sync      -> Deploys the main application manifests.
+  * PostSync  -> Runs post-deployment verification, smoke tests, or notifications.
+  * SyncFail  -> Triggers cleanup tasks if synchronization fails.
+
+Sync Waves:
+  * Annotation: `argocd.argoworkflows.io/sync-wave: "1"`
+  * Controls ordering: Smaller numbers apply first (e.g., Wave -1 applies CRDs/DBs,
+    Wave 0 applies Services/Config, Wave 1 applies Deployments).
+  * Argo CD waits for previous wave resources to be healthy before applying next wave.
+
+================================================================================

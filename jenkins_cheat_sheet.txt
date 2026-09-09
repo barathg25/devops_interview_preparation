@@ -1,0 +1,154 @@
+================================================================================
+                    JENKINS CI/CD INTERVIEW CHEAT SHEET
+================================================================================
+
+Jenkins is an open-source Java-based automation server used to build, test,
+and deploy software continuously across distributed agent nodes.
+
+
+--------------------------------------------------------------------------------
+1. CORE ARCHITECTURE & COMPONENTS
+--------------------------------------------------------------------------------
+
+Component               1-line Description
+--------------------------------------------------------------------------------
+Jenkins Controller      The master brain; schedules builds, dispatches jobs, and hosts UI.
+Jenkins Agent (Node)    Worker machine (VM, bare-metal, or Pod) that executes jobs.
+Executor                A processing slot on an agent capable of running a single build.
+JENKINS_HOME            Directory where Jenkins stores all jobs, configs, plugins, and logs.
+Plugins                 Modular extensions adding integrations (Git, Docker, Slack, K8s).
+Remoting (Inbound/SSH)  Communication protocol connecting controller to agents (via port 50000).
+
+
+--------------------------------------------------------------------------------
+2. DECLARATIVE VS SCRIPTED PIPELINE SYNTAX
+--------------------------------------------------------------------------------
+
+Feature                 Declarative Pipeline            Scripted Pipeline
+--------------------------------------------------------------------------------
+Root Wrapper            pipeline { ... }                node { ... }
+Syntax Style            Strict, opinionated DSL         Groovy-based programmatic logic
+Learning Curve          Simple and easy to read         Steep; requires Groovy knowledge
+Error Checking          Validates syntax before running Dynamic; fails at runtime stage
+Flexibility             Moderate (use `script {}` block) Maximum; loops, try/catch natively
+Recommended By          Jenkins project standard        Legacy / advanced complex logic
+
+
+--------------------------------------------------------------------------------
+3. DECLARATIVE PIPELINE DIRECTIVES & STRUCTURE
+--------------------------------------------------------------------------------
+
+Directive               Purpose
+--------------------------------------------------------------------------------
+pipeline                Root block defining the entire declarative pipeline.
+agent                   Specifies where the job executes (e.g., `agent any`, `docker`, `none`).
+stages                  Encapsulates one or more sequential `stage` blocks.
+stage                   Defines a logical phase of the build (Build, Test, Deploy).
+steps                   Contains the actual commands to run inside a stage (`sh`, `bat`).
+environment             Defines key-value environment variables globally or per stage.
+parameters              Defines user inputs at build time (string, boolean, choice).
+triggers                Automates pipeline triggers (cron, pollSCM, upstream).
+tools                   Auto-installs and adds build tools to PATH (maven, jdk, nodejs).
+when                    Conditional block to run a stage only if criteria match.
+post                    Executes cleanup or notification tasks based on pipeline outcome.
+
+
+--------------------------------------------------------------------------------
+4. THE `post` BLOCK CONDITIONS
+--------------------------------------------------------------------------------
+
+Condition               When It Runs
+--------------------------------------------------------------------------------
+always                  Runs regardless of the completion status (success/failure).
+success                 Runs only if current build completed successfully.
+failure                 Runs only if current build failed (RED status).
+unstable                Runs if build completed with warnings or test failures (YELLOW).
+changed                 Runs only if the current status differs from the previous build.
+aborted                 Runs if the build was manually stopped or timed out.
+
+
+--------------------------------------------------------------------------------
+5. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * Freestyle Job vs Pipeline Job:
+    - Freestyle -> GUI-based form setup; brittle, hard to version control, not portable.
+    - Pipeline  -> Code-based (`Jenkinsfile`); versioned in Git, auditable, portable.
+
+  * Jenkins Master (Controller) vs Agent:
+    - Controller -> Coordinates, manages queues, renders Web UI, stores configs.
+    - Agent      -> Dedicated worker machine running actual compiler/runner workloads.
+
+  * pollSCM vs Webhook:
+    - pollSCM -> Jenkins regularly polls Git repo for changes (resource-heavy, latency).
+    - Webhook -> Git provider immediately pushes an HTTP event to Jenkins (instant, scalable).
+
+  * `sh` vs `bat`:
+    - sh  -> Executes shell commands on Linux/macOS agents.
+    - bat -> Executes batch/cmd commands on Windows agents.
+
+    >> One-Line Answer (What is Pipeline as Code?):
+       "Pipeline as Code means defining the entire CI/CD delivery pipeline inside
+        a version-controlled text file (`Jenkinsfile`) stored alongside application source code."
+
+
+--------------------------------------------------------------------------------
+6. RUNNING DYNAMIC AGENTS IN KUBERNETES
+--------------------------------------------------------------------------------
+
+  Traditional VM Agents:
+    - Static, idle VMs consume constant infrastructure cost.
+    - Risk of tool version drift and dirty workspaces.
+
+  Kubernetes Dynamic Pod Agents:
+    - Controller spins up an ephemeral Pod in K8s when a build starts.
+    - Containers inside Pod run the required build steps.
+    - Pod is deleted immediately after the build completes (zero waste, pure isolation).
+
+
+--------------------------------------------------------------------------------
+7. PRODUCTION DECLARATIVE PIPELINE TEMPLATE
+--------------------------------------------------------------------------------
+
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = "ecommerce-api"
+        DOCKER_REGISTRY = "registry.hub.docker.com/myorg"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/myorg/ecommerce-api.git'
+            }
+        }
+        stage('Build & Test') {
+            steps {
+                sh 'npm install'
+                sh 'npm test'
+            }
+        }
+        stage('Containerize') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh 'docker build -t ${DOCKER_REGISTRY}/${APP_NAME}:${BUILD_NUMBER} .'
+                sh 'docker push ${DOCKER_REGISTRY}/${APP_NAME}:${BUILD_NUMBER}'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        failure {
+            slackSend channel: '#alerts', message: "Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+    }
+}
+
+================================================================================

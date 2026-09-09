@@ -1,0 +1,116 @@
+================================================================================
+               PROMETHEUS & GRAFANA INTERVIEW CHEAT SHEET
+================================================================================
+
+Prometheus is an open-source pull-based metrics monitoring and alerting system 
+optimized for time-series data, while Grafana is an open-source visualization, 
+analytics, and dashboarding platform.
+
+
+--------------------------------------------------------------------------------
+1. PROMETHEUS CORE ARCHITECTURE & COMPONENTS
+--------------------------------------------------------------------------------
+
+Component               1-line Description
+--------------------------------------------------------------------------------
+Prometheus Server       Scrapes, indexes, and stores time-series data in custom TSDB.
+TSDB                    Time-Series Database storing metrics locally on disk in blocks.
+Retrieval (Scraper)     Pull engine that queries HTTP `/metrics` targets periodically.
+Service Discovery (SD)  Dynamically locates targets via Kubernetes, AWS, Consul, etc.
+Pushgateway             Intermediary buffer accepting metrics pushed from short batch jobs.
+Alertmanager            Deduplicates, groups, mutes, and routes alerts (Slack, PagerDuty).
+Exporters               Sidecars/agents converting 3rd-party metrics to Prometheus format.
+
+
+--------------------------------------------------------------------------------
+2. THE 4 PROMETHEUS METRIC TYPES
+--------------------------------------------------------------------------------
+
+Metric Type     Characteristics & Interview Use Cases
+--------------------------------------------------------------------------------
+Counter         A cumulative metric that ONLY increases or resets to 0 upon restart.
+                * Use case: HTTP request counts, system restarts, errors.
+                * Key functions: rate(), irate(), increase().
+
+Gauge           A metric that can arbitrarily go UP or DOWN at any moment.
+                * Use case: Current memory usage, CPU load, active connections.
+                * Key functions: delta(), predict_linear().
+
+Histogram       Samples observations (usually durations/sizes) and puts them into 
+                configurable bucket counters (`le` label), plus sum and count.
+                * Use case: Request latency, API response payloads.
+                * Key functions: histogram_quantile().
+
+Summary         Similar to Histogram, but calculates configurable client-side 
+                quantiles/percentiles directly on the application instance.
+                * Note: Cannot be aggregated across multiple instances.
+
+
+--------------------------------------------------------------------------------
+3. ESSENTIAL PromQL FUNCTIONS & QUERIES
+--------------------------------------------------------------------------------
+
+Query / Function                         Purpose
+--------------------------------------------------------------------------------
+http_requests_total                      Raw instantaneous metric vector.
+rate(http_requests_total[5m])            Per-second average increase over 5m window.
+irate(http_requests_total[1m])           Instant per-second rate calculated from last 2 points.
+increase(http_requests_total[1h])        Total numeric increase over the last 1 hour.
+sum by (status) (rate(requests[5m]))     Aggregates per-second rate grouped by HTTP status.
+topk(5, rate(cpu_seconds_total[5m]))     Returns top 5 highest CPU-consuming targets.
+histogram_quantile(0.95, sum by (le)     Calculates 95th percentile (P95) latency
+  (rate(http_duration_bucket[5m])))      across all instances.
+
+
+--------------------------------------------------------------------------------
+4. GRAFANA CORE CONCEPTS & TERMINOLOGY
+--------------------------------------------------------------------------------
+
+Concept                 1-line Description
+--------------------------------------------------------------------------------
+Data Source             Backend pipeline supplying metrics (Prometheus, Loki, CloudWatch).
+Panel                   Individual visualization widget (Time-Series, Gauge, Table, Bar).
+Dashboard               Collection of panels organized in rows for unified system visibility.
+Dashboard Variables     Dynamic dropdown filters ($namespace, $pod, $interval) for reusability.
+Alerting (Unified)      Grafana-native alert rules triggering based on panel queries.
+Transformations         Client-side manipulation of data (filter, rename, calculate fields).
+Annotations             Visual overlays (vertical lines/markers) showing events (deployments).
+
+
+--------------------------------------------------------------------------------
+5. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * Pull Model (Prometheus) vs Push Model (Datadog, StatsD, CloudWatch):
+    - Pull -> Central server decides when/how often to fetch; simplifies health checks.
+    - Push -> Agents continuously transmit to server; risk of overwhelming central endpoint.
+
+  * rate() vs irate():
+    - rate()  -> Average rate over time range; smooths out spikes (better for alerts/SLOs).
+    - irate() -> Instantaneous rate from last 2 data points; captures volatile spikes.
+
+  * Histogram vs Summary:
+    - Histogram -> Server calculates percentiles; can aggregate across multiple pods.
+    - Summary   -> Client calculates quantiles; cannot be aggregated across replicas.
+
+  * Prometheus Alertmanager vs Grafana Alerting:
+    - Alertmanager     -> Evaluates rules directly at TSDB level; reliable, code-centric.
+    - Grafana Alerting -> Evaluates dashboard queries; highly visual, supports multi-source.
+
+    >> One-Line Answer (How Prometheus & Grafana Work Together):
+       "Prometheus scrapes and stores time-series metric data using PromQL, while 
+        Grafana queries that data source to render real-time dashboards and visualizations."
+
+
+--------------------------------------------------------------------------------
+6. PRODUCTION MONITORING CHECKLIST: 4 GOLDEN SIGNALS
+--------------------------------------------------------------------------------
+
+Signal          What It Measures                  PromQL / Metric Example
+--------------------------------------------------------------------------------
+Latency         Time taken to service a request   rate(http_request_duration_seconds_sum)
+Traffic         Demand placed on the system       sum(rate(http_requests_total[5m]))
+Errors          Rate of failing requests          rate(http_requests_total{status=~"5.."}[5m])
+Saturation      How "full" the service/infra is   node_memory_Active_bytes / node_memory_MemTotal
+
+================================================================================

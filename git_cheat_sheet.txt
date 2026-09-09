@@ -1,0 +1,121 @@
+================================================================================
+                     GIT & GITHUB INTERVIEW CHEAT SHEET
+================================================================================
+
+Git is a distributed version control system that tracks changes in source code
+during software development, enabling collaboration, branching, and rollbacks.
+
+
+--------------------------------------------------------------------------------
+1. THE 3 LOCAL ZONES (+ REMOTE)
+--------------------------------------------------------------------------------
+
+  Working Directory   --->   Staging Area (Index)   --->   Local Repository   --->   Remote Repo
+     (Unstaged)                 (git add)                    (git commit)             (git push)
+  
+  * Working Directory: Files you are actively modifying on your machine.
+  * Staging Area     : Snapshot of changes marked to go into the next commit.
+  * Local Repo (.git): Fully committed history stored locally on your machine.
+  * Remote Repo      : Central shared copy (GitHub, GitLab, Bitbucket).
+
+
+--------------------------------------------------------------------------------
+2. ESSENTIAL GIT CLI COMMANDS REFERENCE
+--------------------------------------------------------------------------------
+
+Command                        1-line Description
+--------------------------------------------------------------------------------
+git init                       Initializes a new empty Git repository locally.
+git clone <url>                Downloads a remote repository and its entire history.
+git status                     Shows state of working directory and staging area.
+git add <file>                 Adds file changes to staging area (`git add .` for all).
+git commit -m "<msg>"          Records staged snapshot permanently into history.
+git commit --amend             Modifies the most recent commit message or files.
+git diff                       Shows unstaged changes between working dir and staging.
+git diff --staged              Shows staged changes ready to be committed.
+git log --oneline --graph      Visualizes commit history concisely as a graph.
+git branch                     Lists local branches (`-a` includes remote branches).
+git checkout -b <branch>       Creates and switches to a new branch (`git switch -c`).
+git checkout <branch/commit>   Switches branches or restores working tree files.
+git switch <branch>            Modern, dedicated command to switch branches.
+git merge <branch>             Combines specified branch into current active branch.
+git rebase <branch>            Reapplies commits on top of another base tip.
+git fetch                      Downloads objects and refs from remote without merging.
+git pull                       Fetches remote changes and merges them into current branch.
+git push -u origin <branch>    Uploads local branch commits to remote repository.
+git stash                      Temporarily shelves uncommitted changes.
+git stash pop                  Restores and removes most recently stashed changes.
+git reset --soft HEAD~1        Undoes last commit; keeps changes staged.
+git reset --mixed HEAD~1       Undoes last commit; keeps changes unstaged (default).
+git reset --hard HEAD~1        Undoes last commit; permanently destroys all changes.
+git revert <commit-hash>       Creates a new commit that inverts specified commit.
+git cherry-pick <hash>         Applies a specific commit from one branch onto another.
+git clean -fd                  Removes untracked files (-f) and directories (-d).
+
+
+--------------------------------------------------------------------------------
+3. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * git merge vs git rebase:
+    - merge  -> Preserves complete history and branch topology with a merge commit.
+    - rebase -> Rewrites history linearly by moving commits onto target branch base.
+
+  * git fetch vs git pull:
+    - fetch  -> Retrieves remote commits and metadata; does NOT touch local working files.
+    - pull   -> Executes `git fetch` followed immediately by `git merge`.
+
+  * git reset vs git revert:
+    - reset  -> Rewrites history by moving HEAD backward (dangerous on shared branches).
+    - revert -> Safe for public branches; records a brand-new commit that undoes changes.
+
+  * git reset modes:
+    - --soft  -> HEAD moves back. Changes stay in STAGING.
+    - --mixed -> HEAD moves back. Changes stay in WORKING DIR (unstaged).
+    - --hard  -> HEAD moves back. Changes are PERMANENTLY ERASED.
+
+  * git stash vs commit:
+    - stash  -> Quick save for incomplete work to cleanly switch branches without committing.
+    - commit -> Permanent checkpoint with a message in repository history.
+
+    >> One-Line Answer (Merge vs Rebase):
+       "Merge preserves branch history and creates an explicit merge commit, while
+        Rebase rewrites commit history onto a new base to produce a clean linear graph."
+
+
+--------------------------------------------------------------------------------
+4. BRANCHING STRATEGIES (FOR SENIOR INTERVIEWS)
+--------------------------------------------------------------------------------
+
+  * GitFlow:
+    - Heavy, structured branching model.
+    - Branches: main, develop, feature/*, release/*, hotfix/*.
+    - Best for: Scheduled releases, traditional enterprise software.
+
+  * Trunk-Based Development:
+    - Fast, continuous integration model.
+    - Developers commit directly to main (trunk) or short-lived feature branches (< 1 day).
+    - Relies on Feature Flags / Toggles.
+    - Best for: High-velocity CI/CD, microservices, DevOps teams.
+
+  * GitHub Flow:
+    - Simplified model: `main` + short-lived feature branches + Pull Requests.
+
+
+--------------------------------------------------------------------------------
+5. MERGE CONFLICT RESOLUTION WORKFLOW
+--------------------------------------------------------------------------------
+
+  Step 1: Identify conflicting files
+          `git status`
+  Step 2: Open file and inspect conflict markers
+          <<<<<<< HEAD (Your changes)
+          =======
+          >>>>>>> feature-branch (Incoming changes)
+  Step 3: Edit file to resolve differences and remove conflict markers
+  Step 4: Stage resolved file
+          `git add <file>`
+  Step 5: Finalize resolution
+          `git commit` (if merging) or `git rebase --continue` (if rebasing)
+
+================================================================================

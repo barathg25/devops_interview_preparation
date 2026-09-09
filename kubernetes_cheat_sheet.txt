@@ -1,0 +1,196 @@
+================================================================================
+           KUBERNETES (K8s) COMPLETE INTERVIEW GUIDE & CHEAT SHEET
+================================================================================
+
+Kubernetes is an open-source platform that orchestrates containers. It handles 
+deploying, scaling, networking, and healing your applications automatically so 
+they run reliably without manual intervention.
+
+
+--------------------------------------------------------------------------------
+1. CRITICAL KUBERNETES OBJECTS (THE "WHAT IS WHAT" LIST)
+--------------------------------------------------------------------------------
+
+Workloads & Controllers:
+* Pod           : The smallest deployable unit in K8s; holds 1+ containers that share 
+                  networking (localhost) and storage.
+* ReplicaSet    : Ensures a specific number of identical Pods are always running.
+* Deployment    : The standard way to manage stateless apps; handles rolling updates, 
+                  pauses, rollbacks, and manages ReplicaSets underneath.
+* StatefulSet   : Manages stateful apps (databases, queues); gives each Pod a stable, 
+                  predictable network name (db-0, db-1) and persistent storage.
+* DaemonSet     : Runs exactly one copy of a Pod on every node (or selected nodes). 
+                  Commonly used for log collectors (Fluentd) and monitors (Prometheus).
+* Job           : Runs batch tasks until completion (exit code 0), then terminates.
+* CronJob       : Runs Jobs automatically on a recurring schedule (e.g., cron syntax).
+
+Networking & Traffic Routing:
+* Service       : Provides a stable virtual IP and DNS name to reach transient Pods.
+  - ClusterIP   : Default. Exposes the app ONLY inside the cluster.
+  - NodePort    : Opens a dedicated static port (30000-32767) on each physical Node.
+  - LoadBalancer: Requests a real cloud load balancer (AWS NLB/ALB, GCP LB) to route traffic.
+  - ExternalName: Maps a Service to an external DNS CNAME string (no proxying).
+* Ingress       : An L7 HTTP/HTTPS router that routes traffic from outside into Services 
+                  based on domain names (/api -> serviceA, shop.com -> serviceB).
+* NetworkPolicy : Acts as an in-cluster firewall; allows or blocks traffic between Pods 
+                  using IP addresses and port rules.
+
+Configuration & Sensitive Data:
+* ConfigMap     : Stores plain text configuration data (environment variables, config files).
+* Secret        : Stores sensitive information (passwords, tokens, TLS keys) encoded in base64.
+
+Persistent Storage:
+* StorageClass  : Defines the "provisioner" and type of disk (e.g., AWS gp3, SSD) for dynamic allocation.
+* PV (Volume)   : Actual cluster-level storage volume provisioned by an admin or cloud driver.
+* PVC (Claim)   : A user's ticket/request for storage that automatically binds to a matching PV.
+
+Cluster Management & Security:
+* Namespace     : Virtual walls inside a cluster to divide resources by team, environment, or project.
+* ServiceAccount: An identity given to Pods so they can talk to the Kubernetes API Server securely.
+* Role          : A list of allowed actions (GET, LIST, CREATE) inside a specific Namespace.
+* ClusterRole   : A list of allowed actions across the entire cluster (all namespaces or non-namespaced).
+* RoleBinding   : Grants Role permissions to a user or ServiceAccount within a Namespace.
+* ClusterRoleBinding : Grants permissions cluster-wide across all Namespaces.
+
+Scaling & Governance:
+* HPA           : Horizontal Pod Autoscaler; adds/removes Pod replicas based on CPU/RAM metrics.
+* VPA           : Vertical Pod Autoscaler; resizes Pod CPU/memory requests and limits automatically.
+* ResourceQuota : Sets maximum limits on resource consumption (total CPU, RAM, Pod count) per Namespace.
+* LimitRange    : Sets default, minimum, and maximum resource limits for individual Pods/Containers.
+
+
+--------------------------------------------------------------------------------
+2. KUBERNETES ARCHITECTURE: CONTROL PLANE VS WORKER NODES
+--------------------------------------------------------------------------------
+
+                         Kubernetes Cluster
+                                │
+              ┌─────────────────┴─────────────────┐
+              │                                   │
+        CONTROL PLANE                         WORKER NODE
+        (Cluster Brain)                     (Workhorse Node)
+              │                                   │
+     ┌────────┼─────────┐                ┌────────┼─────────┐
+     │        │         │                │        │         │
+ API Server  etcd   Scheduler          kubelet kube-proxy Runtime
+     │
+ Controller Manager
+     │
+     └───────────────────────┐
+                             ↓
+                         Deployment
+                             ↓
+                         ReplicaSet
+                             ↓
+                           Pods
+                             │
+              ┌──────────────┼──────────────┐
+              ↓              ↓              ↓
+           Service        ConfigMap       Secret
+              │
+              ↓
+           Ingress
+              │
+              ↓
+        External Traffic
+
+
+--------------------------------------------------------------------------------
+3. CONTROL PLANE (MASTER NODE) EXPLAINED SIMPLY
+--------------------------------------------------------------------------------
+
+Memory Trick: Master = "A E S C"
+
+1. A -> kube-apiserver:
+   - The receptionist and gateway of the cluster.
+   - Every request (from kubectl, worker nodes, or controllers) passes through here.
+   - It validates and configures data for pods, services, and all objects.
+
+2. E -> etcd:
+   - The cluster brain's memory bank.
+   - A consistent, highly-available distributed key-value store.
+   - Stores the complete state and configuration of the entire cluster.
+
+3. S -> kube-scheduler:
+   - The assigner.
+   - Watches for newly created Pods that have no assigned node and assigns them 
+     to the best worker node based on resource availability, taints, and affinities.
+
+4. C -> kube-controller-manager:
+   - The regulator.
+   - Runs background loops comparing "current state" with "desired state".
+   - Includes Node Controller (detects dead nodes), Replication Controller, and 
+     EndpointSlice controller.
+
+Node Components (Present on every node):
+* kubelet           : The node captain; talks to the API server, ensures containers 
+                      described in PodSpecs are running and healthy.
+* kube-proxy        : The network switchboard; maintains network rules on nodes to allow 
+                      network communication to Pods from inside or outside the cluster.
+* Container Runtime : The underlying software that runs containers (containerd, CRI-O).
+
+
+--------------------------------------------------------------------------------
+4. KEY STEP-BY-STEP FLOWS FOR INTERVIEWS
+--------------------------------------------------------------------------------
+
+Flow A: How External Traffic Reaches a Container
+  1. User sends an HTTP request from a browser.
+  2. Cloud Load Balancer catches the public traffic.
+  3. Ingress Controller routes traffic based on host/path rules.
+  4. Service provides an internal stable endpoint and load-balances across pods.
+  5. Pod receives traffic via its virtual IP.
+  6. Container handles the request on its listening port.
+
+Flow B: What Happens When You Deploy an App ("kubectl apply -f app.yaml")
+  1. User runs `kubectl apply` -> Request goes to kube-apiserver.
+  2. kube-apiserver authenticates/authorizes the user and writes the intent to etcd.
+  3. Controller Manager notices a new Deployment is needed and generates a ReplicaSet.
+  4. ReplicaSet creates the required Pod objects (marked unassigned).
+  5. kube-scheduler inspects nodes, selects the best node, and updates the Pod spec.
+  6. kubelet on that selected node detects an assigned Pod, calls the Container 
+     Runtime (e.g., containerd) to pull the image and run the container.
+  7. kube-proxy configures local iptables/IPVS rules so the Pod can be reached.
+
+Flow C: Storage Lifecycle
+  Pod requests PVC  -->  StorageClass triggers  -->  PV is created  -->  Mounted to Pod
+
+Flow D: RBAC Security Binding
+  ServiceAccount (Identity)  -->  Role (Permissions)  -->  RoleBinding (Glue between them)
+
+
+--------------------------------------------------------------------------------
+5. COMMON TRICKY INTERVIEW QUESTIONS & DISTINCTIONS
+--------------------------------------------------------------------------------
+
+Q1: What is the difference between Deployment and StatefulSet?
+  - Deployment : For stateless apps. Pods are completely interchangeable, have random 
+                 names (web-7d4b-x9z), and can be deleted/recreated in any order.
+  - StatefulSet: For stateful apps (DBs). Pods have stable, predictable network identities 
+                 (db-0, db-1), start/terminate sequentially, and keep their dedicated PVs.
+
+Q2: What is the difference between DaemonSet and Deployment?
+  - Deployment : Runs a specified number of replicas distributed across the cluster.
+  - DaemonSet  : Ensures exactly ONE copy of the Pod runs on every single node automatically.
+
+Q3: What is the difference between Job and CronJob?
+  - Job        : Runs a workload once until completion, then stops.
+  - CronJob    : Triggers and runs Jobs on a repeating schedule (like Linux cron).
+
+Q4: What is the difference between ClusterIP, NodePort, and LoadBalancer?
+  - ClusterIP   : Exposes service internally inside the cluster only.
+  - NodePort    : Opens a high port (30000-32767) on all nodes for external testing.
+  - LoadBalancer: Creates an actual cloud load balancer with a real public IP.
+
+Q5: What is the difference between ResourceQuota and LimitRange?
+  - ResourceQuota: Sets a hard aggregate cap for the ENTIRE namespace (e.g., max 20 CPUs total).
+  - LimitRange   : Sets boundaries (min/max/default) for EACH SINGLE Pod or container.
+
+Q6: Are Control Plane components installed as systemd services?
+  - In a standard kubeadm setup, core control-plane components (API server, etcd, 
+    scheduler, controller-manager) run as Static Pods managed by the local kubelet.
+  - kubelet and the container runtime (containerd) run directly as OS systemd services.
+  - In managed cloud setups (AWS EKS, Azure AKS, GCP GKE), the cloud provider manages 
+    and hides the control-plane nodes entirely.
+
+================================================================================

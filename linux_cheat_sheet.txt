@@ -1,0 +1,136 @@
+================================================================================
+                    LINUX FOR DEVOPS INTERVIEW CHEAT SHEET
+================================================================================
+
+Linux is an open-source, Unix-like operating system kernel that powers modern
+servers, containers, and cloud infrastructure worldwide.
+
+
+--------------------------------------------------------------------------------
+1. CRITICAL DIRECTORY HIERARCHY (FHS)
+--------------------------------------------------------------------------------
+
+Directory       Purpose
+--------------------------------------------------------------------------------
+/bin, /usr/bin  Essential user command binaries (ls, cp, grep).
+/sbin, /usr/sbin System administration binaries (fdisk, iptables, ip).
+/etc            System-wide configuration files and startup scripts.
+/var            Variable data (logs in /var/log, mail, spool files).
+/proc           Virtual filesystem exposing kernel stats and process data in RAM.
+/sys            Virtual filesystem exposing hardware devices and drivers.
+/dev            Special device nodes (disks, terminals, /dev/null, /dev/urandom).
+/opt            Add-on third-party application software packages.
+/tmp            Temporary files (typically wiped upon reboot).
+/home, /root    Home directories for regular users and the root superuser.
+
+
+--------------------------------------------------------------------------------
+2. ESSENTIAL CLI TOOLS REFERENCE BY CATEGORY
+--------------------------------------------------------------------------------
+
+File & Text Manipulation:
+  * grep -rn "text" .    : Recursively search for text with line numbers.
+  * sed -i 's/foo/bar/g' : Stream editor for inline string find-and-replace.
+  * awk '{print $1,$3}'  : Pattern scanning and text-column processing language.
+  * find /path -name "*.log" -mtime +7 : Find files older than 7 days.
+  * tar -czvf archive.tar.gz /dir     : Create compressed gzip tar archive.
+  * tar -xzvf archive.tar.gz          : Extract compressed gzip tar archive.
+  * tail -f -n 100 /var/log/syslog    : Follow live output of file in real-time.
+
+System Resources & Performance Troubleshooting:
+  * top / htop           : Interactive real-time process and CPU/memory monitor.
+  * free -h              : Display total, used, and available physical memory & swap.
+  * df -h                : Show disk filesystem disk space usage (human-readable).
+  * du -sh *             : Display disk space consumed by directories in current path.
+  * uptime               : Shows system run duration and 1, 5, 15-minute load averages.
+  * vmstat 1             : Reports virtual memory, paging, CPU activity every second.
+  * iostat -xz 1         : Granular disk I/O metrics and device saturation (%util).
+
+Networking & Connectivity:
+  * ip addr show (or ip a): Display IP addresses and network interfaces.
+  * ip route show        : View network routing table and default gateway.
+  * ss -tulpn            : Fast modern replacement for netstat; lists open listening ports.
+  * curl -Iv https://... : Inspect HTTP response headers and TLS handshake steps.
+  * dig +short domain.com: DNS lookup utility to resolve records quickly.
+  * traceroute / tracepath: Trace packet hops across routers to destination host.
+  * ping -c 4 <host>     : Send ICMP echo requests to verify connectivity.
+
+Process Management:
+  * ps aux | grep <name> : Snapshot of all currently running processes.
+  * kill -9 <PID>        : Force-terminate process immediately (SIGKILL).
+  * kill -15 <PID>       : Gracefully ask process to terminate cleanly (SIGTERM).
+  * pkill -f <name>      : Kill processes matching name pattern.
+  * nohup <cmd> &        : Run command decoupled from terminal session in background.
+
+Permissions & Ownership:
+  * chmod 755 <file>     : rwxr-xr-x (Owner: read/write/exec; Others: read/exec).
+  * chmod 644 <file>     : rw-r--r-- (Owner: read/write; Others: read-only).
+  * chown user:group <f> : Change file owner and primary group.
+  * umask 022            : Sets default permission filter for newly created files/dirs.
+
+
+--------------------------------------------------------------------------------
+3. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * Hard Link vs Soft Link (Symlink):
+    - Hard Link : Direct pointer to physical disk inode. Shares data; file remains 
+                  intact even if original path is deleted. Cannot cross filesystems.
+    - Soft Link : Shortcut pointer containing path string of target file. Breaks 
+                  (dangling link) if target file is deleted or moved. Can cross filesystems.
+
+  * SIGTERM (15) vs SIGKILL (9):
+    - SIGTERM   -> Graceful shutdown request; process can catch, clean up resources, 
+                   and exit safely.
+    - SIGKILL   -> Immediate kernel termination; cannot be caught, ignored, or handled.
+
+  * Process vs Thread:
+    - Process   -> Independent execution program with isolated virtual memory space.
+    - Thread    -> Lightweight execution unit inside a process sharing the same memory.
+
+  * TCP vs UDP:
+    - TCP       -> Connection-oriented, ordered, reliable, three-way handshake (SYN/ACK).
+    - UDP       -> Connectionless, lightweight, low-latency, no packet delivery guarantee.
+
+  * Buffer vs Cache:
+    - Buffer    -> Temporary raw disk block storage for pending disk I/O writes/reads.
+    - Cache     -> Cached copies of frequently accessed files from disk stored in RAM.
+
+
+--------------------------------------------------------------------------------
+4. SYSTEMD & SERVICES TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+  * systemctl start <service>    : Start a background service immediately.
+  * systemctl stop <service>     : Stop a running service.
+  * systemctl restart <service>  : Restart a service.
+  * systemctl reload <service>   : Reload configuration without killing connections.
+  * systemctl status <service>   : Inspect service health, status code, and recent logs.
+  * systemctl enable --now <svc> : Enable service to launch on boot and start it now.
+  * journalctl -u <svc> -f       : Follow live systemd journal logs for a service.
+  * journalctl -xe               : View detailed system errors and recent failures.
+
+
+--------------------------------------------------------------------------------
+5. SENIOR DEVOPS TROUBLESHOOTING RUNBOOK
+--------------------------------------------------------------------------------
+
+Scenario 1: High System Load / Server Slowdown
+  Step 1: Check `uptime` -> Evaluate 1, 5, and 15 min load averages against CPU core count.
+  Step 2: Run `top` or `htop` -> Check if bottleneck is CPU (%us, %sy) or I/O wait (%wa).
+  Step 3: If %wa is high, run `iostat -xz 1` to find the saturated disk partition.
+  Step 4: If memory is exhausted, run `free -h` and check swap usage / OOM killer in `dmesg -T`.
+
+Scenario 2: "Disk Space Full" (No Space Left on Device)
+  Step 1: Run `df -h` -> Identify the 100% full filesystem partition.
+  Step 2: Run `du -sh /* 2>/dev/null | sort -hr | head -n 10` -> Pinpoint largest folder.
+  Step 3: If `df -h` shows 100% but `du` doesn't account for it, run:
+          `lsof +L1` -> Identifies deleted files held open by running processes.
+  Step 4: Check inode exhaustion: `df -i` (can occur when millions of tiny files exist).
+
+Scenario 3: Port In Use / Network Unreachable
+  Step 1: Verify listening process: `ss -tulpn | grep :<port>`
+  Step 2: Test network reachability: `nc -zv <IP> <port>` or `curl -Iv telnet://<IP>:<port>`
+  Step 3: Check host firewall rules: `sudo iptables -L -n -v` or `sudo ufw status`.
+
+================================================================================

@@ -1,0 +1,103 @@
+================================================================================
+                     ZABBIX MONITORING INTERVIEW CHEAT SHEET
+================================================================================
+
+Zabbix is an open-source, enterprise-grade distributed monitoring solution
+designed to track the availability, health, and performance of network servers,
+virtual machines, databases, applications, and cloud resources.
+
+
+--------------------------------------------------------------------------------
+1. CORE ARCHITECTURAL COMPONENTS
+--------------------------------------------------------------------------------
+
+Component               1-line Description
+--------------------------------------------------------------------------------
+Zabbix Server           Central engine that polls/receives data, calculates triggers, and alerts.
+Zabbix Database         Relational store (PostgreSQL, MySQL) for historical metrics and config.
+Zabbix Web Frontend     PHP-based management and visualization UI console.
+Zabbix Agent (1 & 2)    Lightweight daemon installed on target hosts to gather local OS metrics.
+Zabbix Proxy            Intermediate buffer polling local hosts and forwarding data to Server.
+Zabbix Java Gateway     Native daemon used to poll JMX metric endpoints from Java apps.
+
+
+--------------------------------------------------------------------------------
+2. ESSENTIAL ZABBIX TERMINOLOGY & CONCEPTS
+--------------------------------------------------------------------------------
+
+Concept                 1-line Description
+--------------------------------------------------------------------------------
+Host                    Any IP/DNS device you want to monitor (server, switch, container).
+Host Group              Logical grouping of hosts used for RBAC permissions and mass-assignment.
+Item                    An individual metric gatherer on a host (e.g., `vfs.fs.size[/,free]`).
+Trigger                 A logical expression evaluating item metrics to define problem state.
+Event                   A timestamped occurrence (e.g., trigger change, discovery, autoregistration).
+Action                  Automated reaction to an event (send email/Slack alert, run remote script).
+Template                Reusable bundle of items, triggers, graphs, dashboards, and discovery rules.
+Media Type              Delivery channel for alerts (Email, SMS, Webhook to Slack/PagerDuty).
+Low-Level Discovery     (LLD) Auto-discovers dynamic components (disks, interfaces, containers).
+
+
+--------------------------------------------------------------------------------
+3. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * Zabbix Agent Active vs Passive Checks:
+    - Passive Check -> Zabbix Server/Proxy connects to Agent (port 10050) and polls metrics.
+    - Active Check  -> Agent requests list of items, collects data, and pushes to Server (port 10051).
+
+  * Zabbix Agent 1 (C) vs Zabbix Agent 2 (Go):
+    - Agent 1 -> Written in C; traditional process-based architecture.
+    - Agent 2 -> Written in Go; concurrency via goroutines, persistent plugins, lower overhead.
+
+  * Zabbix vs Prometheus:
+    - Zabbix     -> Traditional host-centric monitoring; uses relational DB (SQL), built-in alerting/UI.
+    - Prometheus -> Dynamic container/ephemeral-centric; uses TSDB (Time-Series), pull-only via HTTP.
+
+  * Server vs Proxy:
+    - Server -> Evaluates triggers, handles notifications, manages configurations and the DB.
+    - Proxy  -> Collects data offsite behind firewalls, buffers metrics, offloads polling from Server.
+
+    >> One-Line Answer (What is Low-Level Discovery / LLD?):
+       "LLD is an automated mechanism in Zabbix that automatically creates items,
+        triggers, and graphs for variable hardware or software resources like file systems,
+        network interfaces, and CPU cores without manual entry."
+
+
+--------------------------------------------------------------------------------
+4. METRIC FLOW & ARCHITECTURE
+--------------------------------------------------------------------------------
+
+      +-------------------------------------------------+
+      |                 Zabbix Frontend                 |
+      +-------------------------------------------------+
+                               │ (Reads / Writes Config)
+                               v
++------------------+   +------------------+   +-------------------+
+|   Zabbix Proxy   |   |   Zabbix Server  |<->|   Database (RDBMS)|
++------------------+   +------------------+   +-------------------+
+        │                      │
+        │ (Active / Passive)   │ (SNMP / IPMI / Agent)
+        v                      v
++------------------+   +------------------+
+|  Remote Agents   |   |  Target Hosts    |
++------------------+   +------------------+
+
+
+--------------------------------------------------------------------------------
+5. COMMON BUILT-IN ITEM KEYS & FUNCTIONS
+--------------------------------------------------------------------------------
+
+Item Key / Function                    Purpose
+--------------------------------------------------------------------------------
+agent.ping                             Checks if the Zabbix agent is alive (returns 1).
+system.cpu.load[all,avg1]              Collects 1-minute CPU load average across all cores.
+vm.memory.size[available]              Measures available physical RAM in bytes.
+vfs.fs.size[/,pfree]                   Returns percentage of free space on root filesystem.
+net.if.in[eth0,bytes]                  Measures inbound traffic on network interface eth0.
+proc.num[nginx]                        Returns count of active running processes matching name.
+last(/host/key)                        Trigger function checking the most recent metric value.
+avg(/host/key,5m)                      Trigger function returning the average value over 5 minutes.
+nodata(/host/key,3m)                   Trigger function alerting if no data was received for 3 mins.
+
+================================================================================

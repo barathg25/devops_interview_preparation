@@ -1,0 +1,159 @@
+================================================================================
+                     DOCKER & DOCKERFILE INTERVIEW CHEAT SHEET
+================================================================================
+
+Docker is a containerization platform that packages an application and its
+dependencies into lightweight, portable containers so it can run consistently
+across different environments.
+
+
+--------------------------------------------------------------------------------
+1. DOCKERFILE INSTRUCTIONS REFERENCE
+--------------------------------------------------------------------------------
+
+Instruction     Description
+--------------------------------------------------------------------------------
+FROM            Specifies the base image used to build the Docker image.
+RUN             Executes a command during image build time and creates a new layer.
+CMD             Specifies default command or arguments executed when container starts.
+ENTRYPOINT      Defines the main executable/process designed to run in container.
+COPY            Copies files/directories from build context into the image.
+ADD             Copies files (like COPY), plus tar auto-extraction & remote URLs.
+WORKDIR         Sets working directory for subsequent instructions and container.
+ENV             Sets persistent environment variables inside image and container.
+ARG             Defines a build-time variable passed via --build-arg.
+EXPOSE          Documents the port the application listens on (does not publish).
+USER            Specifies user/group under which subsequent commands/process run.
+VOLUME          Creates a mount point for persistent or externally mounted data.
+LABEL           Adds key-value metadata (version, maintainer, description) to image.
+HEALTHCHECK     Defines a command Docker uses to verify container health status.
+SHELL           Changes the default shell used to execute shell-form commands.
+STOPSIGNAL      Specifies system signal sent to container when stopped (default SIGTERM).
+ONBUILD         Defines instructions that run when image is used as a base image.
+
+
+--------------------------------------------------------------------------------
+2. QUICK INTERVIEW MEMORY CATEGORIES
+--------------------------------------------------------------------------------
+
+  * Build:       FROM  ->  ARG  ->  RUN  ->  COPY / ADD
+  * Runtime:     ENTRYPOINT + CMD  ->  ENV  ->  USER
+  * Supporting:  WORKDIR  ->  EXPOSE  ->  VOLUME  ->  HEALTHCHECK  ->  LABEL
+  * Advanced:    SHELL  ->  STOPSIGNAL  ->  ONBUILD
+
+
+--------------------------------------------------------------------------------
+3. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+  * RUN vs CMD vs ENTRYPOINT:
+    - RUN        -> Executes at BUILD TIME; commits result into a new layer.
+    - CMD        -> Default command/arguments at RUNTIME; easily overridden via CLI.
+    - ENTRYPOINT -> Main executable process at RUNTIME; fixed by design.
+
+    >> One-Line Answer (CMD vs ENTRYPOINT):
+       "ENTRYPOINT defines the main executable that the container is intended to run,
+        while CMD provides default arguments or a default command that can be
+        overridden at runtime."
+
+  * ARG vs ENV:
+    - ARG        -> BUILD TIME only (accessible during image creation, not in container).
+    - ENV        -> RUNTIME & BUILD TIME (persists as environment variable in container).
+
+  * COPY vs ADD:
+    - COPY       -> Standard file copy from host build context into container image.
+    - ADD        -> File copy with extra features (auto-extracts tars, accepts URLs).
+
+  * EXPOSE vs -p (publish):
+    - EXPOSE     -> Documentation/metadata only; declares intended listening port.
+    - -p (flag)  -> Publishes and binds container port to host port at runtime.
+
+
+--------------------------------------------------------------------------------
+4. CORE LIFECYCLE PIPELINE
+--------------------------------------------------------------------------------
+
+      +-----------------+
+      |   Dockerfile    |
+      +-----------------+
+               |
+               |  docker build
+               v
+      +-----------------+
+      |  Docker Image   |
+      +-----------------+
+               |
+               |  docker run
+               v
+      +-----------------+
+      |    Container    |
+      +-----------------+
+
+  Rule of Thumb:
+  docker build converts a Dockerfile and build context into a Docker image,
+  while docker run creates and starts a container from that image.
+
+
+--------------------------------------------------------------------------------
+5. ESSENTIAL DOCKER CLI COMMANDS
+--------------------------------------------------------------------------------
+
+Command                  Action
+--------------------------------------------------------------------------------
+docker build             Build image from a Dockerfile and context
+docker images            List images available locally on system
+docker pull              Download image from registry (e.g., Docker Hub)
+docker push              Upload image to remote registry
+docker run               Create and start a new container from an image
+docker ps                List currently running containers
+docker ps -a             List all containers (running and stopped)
+docker start             Start one or more stopped containers
+docker stop              Gracefully stop one or more running containers
+docker restart           Restart running or stopped container
+docker rm                Remove one or more stopped containers
+docker rmi               Remove one or more Docker images
+docker logs              Fetch and view logs of a specified container
+docker exec              Run a command inside an active/running container
+docker inspect           Return detailed JSON information on container or image
+docker stats             Display live stream of container resource usage (CPU/RAM)
+
+
+--------------------------------------------------------------------------------
+6. MOST IMPORTANT `docker build` OPTIONS
+--------------------------------------------------------------------------------
+
+Flag / Option            Description
+--------------------------------------------------------------------------------
+docker build .           Build using context in current working directory
+-t <name:tag>            Tag/name the resulting image (e.g., myapp:1.0)
+-f <path>                Specify custom Dockerfile path (e.g., Dockerfile.prod)
+--no-cache               Do not use cached layers during the build process
+--build-arg <k=v>        Pass build-time argument to Dockerfile ARG instruction
+--target <stage>         Build target stage in multi-stage Dockerfile
+--platform <arch>        Target platform architecture (e.g., linux/amd64, linux/arm64)
+--progress=plain         Show raw, verbose build output
+--pull                   Always attempt to pull newer version of base images
+--network <mode>         Set networking mode for RUN instructions during build
+--secret <id=...>        Provide build-time secrets securely without image leakage
+--ssh <id=...>           Forward SSH agent keys securely during build
+--load                   Load Buildx output image into local Docker daemon
+--push                   Push image directly to remote registry after build
+
+
+--------------------------------------------------------------------------------
+7. PRACTICAL BUILD EXAMPLE DECONSTRUCTION
+--------------------------------------------------------------------------------
+
+Command:
+  docker build -f Dockerfile.prod -t myapp:1.0 .
+
+Breakdown:
+  docker build           -> Initiate image build process
+       |
+  -f Dockerfile.prod     -> Which Dockerfile to use? (Custom build spec)
+       |
+  -t myapp:1.0           -> What should the image be named and tagged?
+       |
+  .                      -> Where is the build context / application files?
+
+================================================================================
