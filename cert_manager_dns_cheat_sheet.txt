@@ -1,0 +1,189 @@
+================================================================================
+          CERT-MANAGER, SSL/TLS & DNS AUTOMATION INTERVIEW CHEAT SHEET
+================================================================================
+
+Cert-Manager is the cloud-native certificate management controller for Kubernetes. 
+It automates the issuance, renewal, and management of X.509 TLS/SSL certificates 
+from Let's Encrypt, HashiCorp Vault, or private CAs, securing internal and external 
+traffic across ingress controllers and microservices.
+
+
+--------------------------------------------------------------------------------
+1. CORE ARCHITECTURE & CUSTOM RESOURCE DEFINITIONS (CRDs)
+--------------------------------------------------------------------------------
+
+Cert-Manager CRD Hierarchy:
+```text
+[ Ingress Manifest with Annotation ]
+               │
+               ▼ (Ingress-Shim Controller)
+        [ Certificate ]          <── Defines domains, renewal window & Secret name
+               │
+               ▼
+     [ CertificateRequest ]      <── Passes CSR (Certificate Signing Request) to Issuer
+               │
+               ▼
+           [ Issuer / ClusterIssuer ]  <── ACME Server details (Let's Encrypt / Vault)
+               │
+               ▼
+            [ Order ]            <── ACME Order tracking validation lifecycle
+               │
+               ▼
+          [ Challenge ]          <── Solves HTTP-01 or DNS-01 verification challenge
+               │
+               ▼ (Validation Succeeded)
+  [ Kubernetes Secret (tls.crt, tls.key) ]
+```
+
+* `Issuer`            : Namespaced resource. Issues certificates ONLY in its own namespace.
+* `ClusterIssuer`     : Cluster-wide resource. Issues certificates for any namespace in the cluster.
+* `Certificate`       : High-level CRD specifying domains (`dnsNames`), Secret target, and Issuer.
+* `CertificateRequest`: Intermediate resource that submits the public key/CSR to the CA.
+* `Order`             : ACME-specific resource representing the request to create a certificate.
+* `Challenge`         : ACME-specific task executing HTTP-01 or DNS-01 proof of domain ownership.
+
+
+--------------------------------------------------------------------------------
+2. HTTP-01 VS DNS-01 CHALLENGES (CRITICAL INTERVIEW TOPIC)
+--------------------------------------------------------------------------------
+
+| Feature | HTTP-01 Challenge | DNS-01 Challenge |
+| :--- | :--- | :--- |
+| **Verification Mechanism**| ACME server makes HTTP GET request to port 80 | ACME server queries authoritative DNS for a TXT record |
+| **Challenge Location** | `http://<domain>/.well-known/acme-challenge/<token>` | `_acme-challenge.<domain>` (TXT Record) |
+| **Wildcard Certs** (`*.example.com`)| ❌ **NOT Supported** | ✅ **Fully Supported** |
+| **Private / Air-Gapped Clusters**| ❌ Requires cluster ingress reachable via public port 80 | ✅ **Supported** (No inbound HTTP traffic needed) |
+| **Required Permissions** | Ingress routing & public internet IP | API credentials to DNS provider (Cloudflare, Route 53) |
+| **Typical Use Case** | Single domain public web services | Wildcard certificates, enterprise private clusters |
+
+One-Line Answer:
+"Use HTTP-01 for simple public domain apps without DNS API access; use DNS-01 whenever 
+you need wildcard certificates (`*.company.com`) or are running private clusters behind firewalls."
+
+
+--------------------------------------------------------------------------------
+3. MULTI-DNS PROVIDER CLUSTERISSUER CONFIGURATIONS
+--------------------------------------------------------------------------------
+
+A. Cloudflare DNS-01 ClusterIssuer (Wildcard SSL via Cloudflare API):
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-cloudflare-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: devops@company.com
+    privateKeySecretRef:
+      name: letsencrypt-cloudflare-private-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token-secret
+              key: api-token
+```
+* Note: Cloudflare API token must have permissions: `Zone.Zone:Read` and `Zone.DNS:Edit`.
+
+B. AWS Route 53 DNS-01 ClusterIssuer (Using IAM Roles for Service Accounts - IRSA):
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-route53-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: devops@company.com
+    privateKeySecretRef:
+      name: letsencrypt-route53-private-key
+    solvers:
+      - dns01:
+          route53:
+            region: us-east-1
+            hostedZoneID: Z10000000000000000000
+```
+* Requires IAM permissions on target hosted zone:
+  `route53:GetChange`, `route53:ChangeResourceRecordSets`, `route53:ListResourceRecordSets`.
+
+
+--------------------------------------------------------------------------------
+4. AUTOMATING SSL ISSUANCE VIA INGRESS ANNOTATIONS
+--------------------------------------------------------------------------------
+
+Using the Ingress-Shim feature, adding a simple annotation to your Ingress manifest 
+automatically triggers Cert-Manager to issue and mount the TLS secret:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payment-ingress
+  namespace: production
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-cloudflare-prod
+    kubernetes.io/ingress.class: nginx
+spec:
+  tls:
+    - hosts:
+        - "*.company.com"
+        - "api.company.com"
+      secretName: wildcard-company-tls     # Cert-Manager writes issued cert here
+  rules:
+    - host: "api.company.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: payment-service
+                port:
+                  number: 80
+```
+
+
+--------------------------------------------------------------------------------
+5. CERTIFICATE LIFECYCLE, EXPIRATION & RENEWAL
+--------------------------------------------------------------------------------
+
+* **Validity Period:** Let's Encrypt certificates are valid for 90 days.
+* **Auto-Renewal Window:** By default, Cert-Manager attempts renewal when **30 days** 
+  remain before expiration (`renewBefore: 720h`).
+* **Secret Mounting:** The generated secret contains two files:
+  - `tls.crt`: The leaf certificate concatenated with intermediate CA certificates.
+  - `tls.key`: The private key.
+* **Pod Reloading Pattern:** When TLS secrets rotate, applications that do not dynamically 
+  read disk changes can be reloaded using the `Reloader` Kubernetes controller:
+  `reloader.stakater.com/auto: "true"`
+
+
+--------------------------------------------------------------------------------
+6. SENIOR PRODUCTION INCIDENT RUNBOOK: CERTIFICATE STUCK IN "ISSUING"
+--------------------------------------------------------------------------------
+
+Step 1: Check Certificate status and events
+  kubectl get certificate -n <namespace>
+  kubectl describe certificate <cert-name> -n <namespace>
+
+Step 2: Inspect the CertificateRequest
+  kubectl get certificaterequest -n <namespace>
+  kubectl describe certificaterequest <req-name> -n <namespace>
+
+Step 3: Inspect ACME Order and Challenge objects
+  kubectl get order,challenge -n <namespace>
+  kubectl describe challenge <challenge-name> -n <namespace>
+
+Common Root Causes & Fixes:
+1. **Let's Encrypt Rate Limit Exceeded:**
+   - Error: `429 urn:ietf:params:acme:error:rateLimited`.
+   - Fix: Use the Let's Encrypt **Staging** environment 
+     (`https://acme-staging-v02.api.letsencrypt.org/directory`) for testing.
+2. **DNS-01 TXT Record Not Propagated:**
+   - Error: `DNS record _acme-challenge.domain.com not found`.
+   - Fix: Check DNS TTLs and ensure recursive nameserver lookups are configured 
+     via `--dns01-recursive-nameservers-only` flag on Cert-Manager controller.
+3. **Invalid DNS Provider Credentials:**
+   - Error: `Unauthorized` / `AccessDenied` to Cloudflare or Route 53.
+   - Fix: Validate secret key reference (`api-token`) or AWS IRSA trust policy.

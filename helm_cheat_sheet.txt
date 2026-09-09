@@ -1,0 +1,237 @@
+================================================================================
+               HELM CHARTS COMPLETE INTERVIEW CHEAT SHEET
+================================================================================
+
+Helm is the official package manager for Kubernetes. It automates the creation, 
+packaging, configuration, deployment, and versioning of complex Kubernetes 
+applications across development, staging, and production environments.
+
+
+--------------------------------------------------------------------------------
+1. HELM 2 VS HELM 3 ARCHITECTURE
+--------------------------------------------------------------------------------
+
+Helm 2 (Legacy):
+* Depended on **Tiller**, an in-cluster Pod server with cluster-admin privileges.
+* Major security vulnerability: Any user with access to Tiller could bypass 
+  Kubernetes RBAC and control the entire cluster.
+* Release information stored in ConfigMaps in the `kube-system` namespace.
+
+Helm 3 (Modern Standard):
+* **Tiller completely removed**: Client-only architecture.
+* Security: Directly uses the executing user's credentials via `kubeconfig` and 
+  enforces native Kubernetes RBAC.
+* Release Storage: State and history stored as **Kubernetes Secrets** 
+  (`sh.helm.release.v1.<release-name>.v<version>`) directly inside the target 
+  namespace where the application is deployed.
+* Library Charts: Supports charts that provide reusable logic/definitions without 
+  deploying resources.
+* OCI Registry Support: Charts can be packaged, pushed, and pulled from standard 
+  container registries (ECR, Harbor, DockerHub) via `oci://`.
+
+
+--------------------------------------------------------------------------------
+2. HELM CHART DIRECTORY STRUCTURE
+--------------------------------------------------------------------------------
+
+```text
+my-microservice/
+├── Chart.yaml             # Metadata (chart name, version, dependencies)
+├── values.yaml            # Default configuration values for templates
+├── values.schema.json     # Optional JSON Schema validating values.yaml input
+├── charts/                # Directory containing dependent subcharts
+├── templates/             # Directory containing Kubernetes manifest templates
+│   ├── deployment.yaml    # Parameterized Deployment manifest
+│   ├── service.yaml       # Parameterized Service manifest
+│   ├── ingress.yaml       # Parameterized Ingress manifest
+│   ├── _helpers.tpl       # Template partials / reusable Go template snippets
+│   └── NOTES.txt          # Usage message printed to user after deployment
+└── .helmignore            # Patterns of files to exclude when packaging
+```
+
+Key Metadata in `Chart.yaml`:
+```yaml
+apiVersion: v2
+name: payment-service
+description: High-throughput payment processing service
+type: application          # application (deployable) or library (reusable logic)
+version: 1.4.2             # SemVer of the HELM CHART itself
+appVersion: "2.8.0"        # SemVer of the underlying application / container image
+dependencies:
+  - name: redis
+    version: "17.3.14"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+```
+
+
+--------------------------------------------------------------------------------
+3. HELM TEMPLATING ESSENTIALS & GO SYNTAX
+--------------------------------------------------------------------------------
+
+Built-in Objects:
+* `.Values`       : Values passed into the chart from `values.yaml` or CLI `--set`.
+* `.Release`      : Details about the release (`.Release.Name`, `.Release.Namespace`, 
+                    `.Release.Revision`, `.Release.IsInstall`, `.Release.IsUpgrade`).
+* `.Chart`        : Metadata defined in `Chart.yaml` (`.Chart.Name`, `.Chart.Version`).
+* `.Capabilities` : Cluster capabilities (`.Capabilities.KubeVersion.GitVersion`).
+
+Control Structures & Functions:
+* Conditionals:
+  ```yaml
+  {{- if .Values.ingress.enabled }}
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  {{- else }}
+  # Ingress is disabled
+  {{- end }}
+  ```
+
+* Loops / Iteration:
+  ```yaml
+  env:
+    {{- range .Values.extraEnv }}
+    - name: {{ .name }}
+      value: {{ .value | quote }}
+    {{- end }}
+  ```
+
+* Modifying Scope (`with`):
+  ```yaml
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ```
+
+* Indentation Control (`indent` vs `nindent`):
+  - `-` inside tags (e.g. `{{-`) strips leading/trailing whitespace.
+  - `toYaml .Values.resources | indent 4` : Indents text by 4 spaces.
+  - `toYaml .Values.resources | nindent 4`: Prepends a **newline** before indenting by 4 spaces (best practice for YAML alignment).
+
+* Default Values & Quoting:
+  ```yaml
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+  port: {{ .Values.service.port | default 8080 }}
+  ```
+
+
+--------------------------------------------------------------------------------
+4. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+1. Helm vs Kustomize:
+   | Feature | Helm | Kustomize |
+   | :--- | :--- | :--- |
+   | **Model** | Parameterized templating engine (Go templates) | Template-free overlay engine (patches YAML) |
+   | **Packaging** | Packages assets into versioned `.tgz` archives | Pure YAML directories with `kustomization.yaml` |
+   | **State Tracking**| Tracks releases and revisions in K8s Secrets | Stateless (does not track release history) |
+   | **Rollback** | Built-in native rollback (`helm rollback`) | Managed via Git revert / CI/CD pipeline |
+   | **Tooling** | Requires `helm` CLI or GitOps controller | Built directly into `kubectl` (`kubectl apply -k`) |
+
+2. `version` vs `appVersion` in `Chart.yaml`:
+   * **`version`:** The version of the **Helm Chart** itself (bumped when changing templates, helpers, or default values).
+   * **`appVersion`:** The version of the **application/container image** running inside the Pod (bumped when developers release new app code).
+
+3. `helm install` vs `helm upgrade --install`:
+   * `helm install`: Fails if a release with the same name already exists in the namespace.
+   * `helm upgrade --install`: **Idempotent**. If the release does not exist, it installs it; if it already exists, it applies upgrades/changes. **Mandatory pattern for CI/CD pipelines**.
+
+
+--------------------------------------------------------------------------------
+5. ARGO CD & GITOPS HELM INTEGRATION
+--------------------------------------------------------------------------------
+
+In modern GitOps (as practiced on your resume), Argo CD renders Helm charts 
+without running the Helm CLI binary.
+
+Argo CD `Application` CRD with Helm Source:
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payment-service-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/company/helm-charts.git
+    targetRevision: main
+    path: charts/payment-service
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-production.yaml
+      parameters:
+        - name: "image.tag"
+          value: "v2.8.0"
+        - name: "replicaCount"
+          value: "5"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payments
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
+
+--------------------------------------------------------------------------------
+6. HELM HOOKS & LIFECYCLE MANAGEMENT
+--------------------------------------------------------------------------------
+
+Helm Hooks allow actions to be executed at specific points during a release lifecycle 
+(e.g., running database migrations before the application pods update).
+
+Common Hook Types:
+* `pre-install`  : Runs before any manifests are applied to the cluster.
+* `post-install` : Runs after all resources in the chart are loaded.
+* `pre-upgrade`  : Runs before an upgrade action is applied (e.g. DB migration).
+* `post-upgrade` : Runs after an upgrade action completes.
+* `pre-rollback` : Runs before a rollback is executed.
+
+Hook Definition via Annotation:
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration-job
+  annotations:
+    "helm.sh/hook": pre-upgrade,pre-install
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          image: company/db-migrator:v2.0
+      restartPolicy: Never
+```
+* `hook-weight`: Controls execution order (negative weights execute first, positive execute last).
+* `hook-delete-policy`: Automatically deletes the hook Job when completed (`hook-succeeded`).
+
+
+--------------------------------------------------------------------------------
+7. ESSENTIAL HELM CLI COMMANDS
+--------------------------------------------------------------------------------
+
+Development & Linting:
+  helm create mychart                   # Scaffolds new chart directory
+  helm lint ./mychart                   # Validates chart syntax and conventions
+  helm template my-rel ./mychart -f values.yaml   # Renders templates to stdout (debug)
+  helm install my-rel ./mychart --dry-run --debug  # Simulates install against API server
+
+Deployment & Lifecycle:
+  helm repo add bitnami https://charts.bitnami.com/bitnami
+  helm repo update
+  helm install my-redis bitnami/redis -n database --create-namespace
+  helm upgrade --install my-app ./mychart -f values-prod.yaml --set image.tag=v2.5.0
+  helm list -A                          # Lists all releases across all namespaces
+
+History & Rollback:
+  helm status my-app -n default         # Shows status of current release
+  helm history my-app -n default        # Displays revision history
+  helm rollback my-app 2 -n default     # Rolls back to revision 2
+  helm uninstall my-app -n default      # Deletes all release resources and secret

@@ -105,9 +105,133 @@ aborted                 Runs if the build was manually stopped or timed out.
     - Containers inside Pod run the required build steps.
     - Pod is deleted immediately after the build completes (zero waste, pure isolation).
 
+  Declarative Pod Template Pattern:
+  ```groovy
+  pipeline {
+      agent {
+          kubernetes {
+              yaml '''
+  apiVersion: v1
+  kind: Pod
+  spec:
+    containers:
+    - name: maven
+      image: maven:3.9.6-eclipse-temurin-17
+      command: ['cat']
+      tty: true
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:debug
+      command: ['cat']
+      tty: true
+  '''
+          }
+      }
+      stages {
+          stage('Build') {
+              steps {
+                  container('maven') {
+                      sh 'mvn clean package'
+                  }
+              }
+          }
+      }
+  }
+  ```
+
 
 --------------------------------------------------------------------------------
-7. PRODUCTION DECLARATIVE PIPELINE TEMPLATE
+7. JENKINS GROOVY SHARED LIBRARIES (SENIOR DEVOPS SPECIALTY)
+--------------------------------------------------------------------------------
+
+Why Shared Libraries?
+Standardizes CI/CD pipelines across 20+ microservices, enforces compliance and security 
+checks centrally, eliminates copy-pasted `Jenkinsfile` drift, and allows single-line pipeline definitions.
+
+Shared Library Directory Layout:
+```text
+(root of git repo)
+├── vars/                     # Global variables & custom pipeline step scripts (.groovy)
+│   ├── standardPipeline.groovy  # Reusable complete pipeline call
+│   ├── notifySlack.groovy       # Custom notification step
+│   └── sonarScan.groovy         # SonarQube analysis step
+├── src/                      # Object-Oriented Groovy classes (business logic & utilities)
+│   └── com/company/devops/
+│       ├── DockerUtils.groovy
+│       └── GitHelper.groovy
+└── resources/                # Static non-Groovy data files (JSON schemas, XML templates)
+    └── configs/pom-template.xml
+```
+
+`vars/` vs `src/` (High-Frequency Interview Distinction):
+* **`vars/`:** Files define global executable functions (singletons). Each file name becomes 
+  a custom pipeline step (e.g. `vars/sonarScan.groovy` is called as `sonarScan()`). 
+  Must implement the `def call(...)` method.
+* **`src/`:** Standard Groovy OOP classes with packages and imports. Loaded into the pipeline 
+  classpath via `import com.company.devops.DockerUtils`.
+
+Consuming Shared Libraries in a `Jenkinsfile`:
+```groovy
+// Load shared library and bind global steps
+@Library('devops-shared-library@v2.1.0') _
+
+// Single-line execution of standardized corporate pipeline
+standardPipeline {
+    appName = 'order-service'
+    language = 'java'
+    deployToK8s = true
+}
+```
+
+Implementation of `vars/standardPipeline.groovy`:
+```groovy
+def call(Map config = [:]) {
+    pipeline {
+        agent any
+        stages {
+            stage('Checkout') {
+                steps { checkout scm }
+            }
+            stage('SonarQube Analysis') {
+                steps {
+                    script {
+                        withSonarQubeEnv('ProductionSonarQube') {
+                            sh "mvn clean verify sonar:sonar -Dsonar.projectName=${config.appName}"
+                        }
+                    }
+                }
+            }
+            stage('Quality Gate') {
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: true
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+
+--------------------------------------------------------------------------------
+8. SONARQUBE INTEGRATION & NON-BLOCKING QUALITY GATES
+--------------------------------------------------------------------------------
+
+The Scanner Execution & Webhook Architecture:
+1. `withSonarQubeEnv('ServerName')`: Injects SonarQube server URL and auth tokens into the build step.
+2. `sh 'mvn sonar:sonar'` / `sonar-scanner`: Analyzes source code and uploads report to SonarQube server.
+3. `waitForQualityGate abortPipeline: true`: Pauses the pipeline until SonarQube completes computation.
+
+THE #1 INTERVIEW QUESTION ON SONARQUBE:
+"Why is `waitForQualityGate` with a Webhook better than polling the SonarQube API?"
+* **Answer:** Polling keeps an active executor thread tied up, consuming resources and starving other jobs. 
+  Using a SonarQube Webhook allows Jenkins to put the pipeline into a suspended sleeping state 
+  and **release the heavy build executor thread** back to the pool. When SonarQube finishes, its 
+  webhook wakes the pipeline up to resume execution.
+
+
+--------------------------------------------------------------------------------
+9. PRODUCTION DECLARATIVE PIPELINE TEMPLATE
 --------------------------------------------------------------------------------
 
 pipeline {
@@ -115,7 +239,7 @@ pipeline {
 
     environment {
         APP_NAME = "ecommerce-api"
-        DOCKER_REGISTRY = "registry.hub.docker.com/myorg"
+        DOCKER_REGISTRY = "123456789012.dkr.ecr.us-east-1.amazonaws.com"
     }
 
     stages {
@@ -130,10 +254,22 @@ pipeline {
                 sh 'npm test'
             }
         }
-        stage('Containerize') {
-            when {
-                branch 'main'
+        stage('SonarQube SAST Scan') {
+            steps {
+                withSonarQubeEnv('SonarQubeProd') {
+                    sh 'npm run sonar'
+                }
             }
+        }
+        stage('Quality Gate Check') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+        stage('Containerize & Publish') {
+            when { branch 'main' }
             steps {
                 sh 'docker build -t ${DOCKER_REGISTRY}/${APP_NAME}:${BUILD_NUMBER} .'
                 sh 'docker push ${DOCKER_REGISTRY}/${APP_NAME}:${BUILD_NUMBER}'

@@ -1,0 +1,296 @@
+================================================================================
+               AWS CLOUD & NETWORKING COMPLETE INTERVIEW CHEAT SHEET
+================================================================================
+
+Amazon Web Services (AWS) is the premier public cloud provider powering enterprise 
+infrastructure. For DevOps and Cloud Engineers, technical interviews focus on 
+Virtual Private Cloud (VPC) network isolation, high-availability architecture, 
+IAM security boundaries, container orchestration (EKS), and multi-cloud storage.
+
+
+--------------------------------------------------------------------------------
+1. CORE ARCHITECTURAL COMPONENTS BY DOMAIN
+--------------------------------------------------------------------------------
+
+Networking:
+* VPC (Virtual Private Cloud) : Logically isolated virtual network for your cloud assets.
+* Subnet                      : Segment of a VPC's IP range; either Public (routes to IGW)
+                                or Private (routes to NAT GW or internal only).
+* Internet Gateway (IGW)      : Horizontally scaled, redundant VPC component that enables 
+                                bidirectional communication with the open internet.
+* NAT Gateway                 : Managed egress-only service allowing private subnet instances 
+                                to access the internet (for OS updates/patches) while blocking 
+                                inbound connections initiated from the internet.
+* Route Table                 : Set of rules (routes) determining where network traffic is directed.
+* VPC Peering                 : Direct network connection between two VPCs (non-transitive).
+* Transit Gateway (TGW)       : Central cloud router connecting hundreds of VPCs and on-premises 
+                                networks in a hub-and-spoke topology (transitive routing).
+* VPC Endpoint (PrivateLink)  : Connects VPC privately to AWS services (S3, ECR, SQS) without 
+                                traversing the public internet.
+
+Compute & Autoscaling:
+* EC2 (Elastic Compute Cloud) : Resizable compute instances (virtual servers).
+* Launch Template             : Versioned blueprint specifying AMI, instance type, key pair, 
+                                security groups, and user-data bootstrap script.
+* Auto Scaling Group (ASG)    : Automatically provisions and terminates EC2 instances based 
+                                on demand metrics, maintaining target health and capacity.
+
+Load Balancing:
+* ALB (Application LB)        : Layer 7 HTTP/HTTPS load balancer; supports path-based, host-based, 
+                                and header-based routing, HTTP/2, WebSockets, and SSL termination.
+* NLB (Network LB)            : Layer 4 TCP/UDP/TLS load balancer; ultra-low latency, handles 
+                                millions of requests/sec, provides static/elastic IPs per AZ.
+
+Storage & Multi-Cloud:
+* EBS (Elastic Block Store)   : Block-level storage volumes attached directly to single EC2 instances.
+* EFS (Elastic File System)   : Fully managed NFS file system mounted concurrently across hundreds 
+                                of EC2 instances and multi-AZ Kubernetes Pods.
+* S3 (Simple Storage Service) : Highly scalable object storage (99.999999999% - 11 9's durability).
+* Cloudflare R2               : S3-compatible zero-egress fee object storage. Used in multi-cloud 
+                                tiering to eliminate expensive AWS S3 outbound data transfer costs.
+
+Databases & DNS:
+* RDS (Relational Database)   : Managed SQL database service (PostgreSQL, MySQL, MariaDB, Aurora).
+* Route 53                    : Highly available and scalable cloud Domain Name System (DNS) service.
+
+
+--------------------------------------------------------------------------------
+2. VPC NETWORKING ARCHITECTURE & TRAFFIC FLOW
+--------------------------------------------------------------------------------
+
+Enterprise Multi-AZ VPC Blueprint:
+
+                  Internet Client
+                         │
+                         ▼
+             [ Internet Gateway (IGW) ]
+                         │
+      ┌──────────────────┴──────────────────┐
+      │                                     │
+      ▼                                     ▼
+[ Public Subnet AZ-1a ]               [ Public Subnet AZ-1b ]
+  - Ingress ALB                         - Ingress ALB
+  - NAT Gateway AZ-1a                   - NAT Gateway AZ-1b
+      │ (egress traffic via NAT)            │ (egress traffic via NAT)
+      ▼                                     ▼
+[ Private Subnet AZ-1a ]              [ Private Subnet AZ-1b ]
+  - Backend EC2 / EKS Nodes             - Backend EC2 / EKS Nodes
+  - Default route -> NAT GW 1a          - Default route -> NAT GW 1b
+      │                                     │
+      ▼                                     ▼
+[ Database Subnet AZ-1a ]             [ Database Subnet AZ-1b ]
+  - RDS Master (Synchronous Rep) ────>  - RDS Multi-AZ Standby
+  - Isolated (No Internet Route)        - Isolated (No Internet Route)
+
+
+Subnet Sizing & CIDR Rules:
+* VPC CIDR: Typical enterprise size `/16` (65,536 IPs, e.g., `10.0.0.0/16`).
+* Subnet CIDR: Typical size `/24` (256 IPs, e.g., `10.0.1.0/24`).
+* AWS Reserved IPs: AWS reserves 5 IP addresses in EVERY subnet:
+  - `.0`: Network address.
+  - `.1`: VPC router.
+  - `.2`: DNS server (AmazonProvidedDNS, base + 2).
+  - `.3`: Future AWS reservation.
+  - `.255`: Network broadcast address.
+  A `/24` subnet yields 251 usable IPs (256 - 5 = 251).
+
+
+--------------------------------------------------------------------------------
+3. HIGH-FREQUENCY INTERVIEW DISTINCTIONS
+--------------------------------------------------------------------------------
+
+1. Security Groups vs Network ACLs (NACLs):
+   | Feature | Security Group (SG) | Network ACL (NACL) |
+   | :--- | :--- | :--- |
+   | **Level** | Instance / ENI network interface | Subnet boundary |
+   | **Statefulness** | **Stateful** (Inbound return traffic allowed automatically) | **Stateless** (Must explicitly allow both inbound and outbound) |
+   | **Rules Allowed** | Allow rules ONLY (Default deny all) | Allow AND Deny rules |
+   | **Rule Evaluation** | All rules evaluated simultaneously | Evaluated in numerical order (lowest first) |
+
+2. Application Load Balancer (ALB) vs Network Load Balancer (NLB):
+   | Feature | Application Load Balancer (ALB) | Network Load Balancer (NLB) |
+   | :--- | :--- | :--- |
+   | **OSI Layer** | Layer 7 (Application: HTTP, HTTPS, gRPC) | Layer 4 (Transport: TCP, UDP, TLS) |
+   | **Routing Capabilities**| Path (`/api`), Host (`app.domain.com`), Headers, Query params | IP protocol, port destination |
+   | **Static IP Address** | No (Elastic DNS name, IPs change dynamically) | Yes (One static Elastic IP per Availability Zone) |
+   | **Client IP Preservation** | Appends client IP in `X-Forwarded-For` header | Natively preserves client IP at TCP layer |
+   | **Performance** | High throughput with Layer 7 inspection | Ultra-high throughput, sub-millisecond latency |
+
+3. NAT Gateway vs Internet Gateway:
+   * **Internet Gateway (IGW):** Virtual VPC router for public subnets; bidirectional. Instances with 
+     public IPs can send and receive internet traffic directly. Free of charge.
+   * **NAT Gateway:** Network Address Translation service inside a public subnet; egress-only. 
+     Instances in private subnets can reach the internet (e.g. `yum update`), but internet users 
+     CANNOT initiate connections to them. Incurs hourly charge + per-GB processed charge.
+
+4. VPC Gateway Endpoints vs Interface Endpoints (AWS PrivateLink):
+   * **Gateway Endpoint:** Free; updates route table to point S3 and DynamoDB prefix lists directly 
+     to AWS internal networks. Only supports S3 and DynamoDB.
+   * **Interface Endpoint:** Provisions an ENI with a private IP in your subnet; powered by AWS 
+     PrivateLink. Charges hourly and per GB. Supports almost all AWS services (ECR, SSM, SQS, STS).
+
+5. RDS Multi-AZ vs Read Replicas:
+   * **Multi-AZ Deployment:** Synchronous replication to a standby instance in a second AZ. For **Disaster 
+     Recovery / High Availability**. Automatic failover within 60-120 seconds. Standby cannot serve reads.
+   * **Read Replicas:** Asynchronous replication across same AZ, multi-AZ, or cross-region. For **Read 
+     Scaling** (offloading read-heavy queries). Can be promoted to standalone master manually.
+
+6. Route 53 CNAME vs ALIAS Record:
+   * **CNAME:** Standard DNS alias pointing one hostname to another. CANNOT be used at zone apex 
+     (root domain, e.g., `domain.com`). Incurs extra DNS resolution lookup.
+   * **ALIAS (AWS Proprietary):** Virtual record pointing directly to AWS resources (ALB, CloudFront, 
+     S3 bucket). CAN be created at the zone apex (`domain.com`). Zero extra DNS query cost; automatically 
+     tracks IP changes of target AWS resource.
+
+7. AWS S3 vs Cloudflare R2 (Multi-Cloud Storage Tiering):
+   * **AWS S3:** Full AWS ecosystem integration, multiple tiers (Intelligent, Glacier), but charges 
+     heavily for Outbound Data Transfer (Egress fees ~$0.09 per GB).
+   * **Cloudflare R2:** S3-compatible API (identical SDKs/tools), zero egress fees ($0.00/GB data transfer).
+   * **DevOps Pattern:** Store hot public assets, build artifacts, or long-term backup archives in 
+     Cloudflare R2 to save thousands in AWS monthly egress bandwidth costs.
+
+
+--------------------------------------------------------------------------------
+4. AWS IDENTITY AND ACCESS MANAGEMENT (IAM) & SECURITY
+--------------------------------------------------------------------------------
+
+IAM Entity Types:
+* IAM User        : Permanent identity for humans or legacy apps (Has password/Access Keys).
+* IAM Group       : Collection of IAM users to manage shared permissions.
+* IAM Role        : Identity with specific permissions, assumed temporarily by trusted entities 
+                    (EC2 instances, Lambda functions, EKS Pods, or external SSO users via STS).
+* Instance Profile: Container for an IAM Role that passes role credentials to an EC2 instance.
+
+IAM Policy Structure:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3ReadSpecificPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::company-build-artifacts",
+        "arn:aws:s3:::company-build-artifacts/releases/*"
+      ],
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": "203.0.113.0/24"
+        }
+      }
+    }
+  ]
+}
+```
+
+Key Policy Rules & Evaluation:
+1. Explicit Deny ALWAYS trumps any Allow.
+2. Default state is Deny (implicit deny).
+3. Requires at least one explicit Allow to execute an action.
+4. Permission Boundary: Maximum permission ceiling assigned to an IAM entity. Even if a policy 
+   allows `AdministratorAccess`, a permission boundary can restrict it strictly to S3 and EC2.
+
+
+--------------------------------------------------------------------------------
+5. AWS CLOUDFORMATION (INFRASTRUCTURE AS CODE)
+--------------------------------------------------------------------------------
+
+CloudFormation Template Skeleton:
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Production ALB and Target Group Stack
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where ALB will be deployed
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [staging, production]
+
+Resources:
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP/HTTPS access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+Outputs:
+  SecurityGroupId:
+    Description: Security Group ID for ALB
+    Value: !Ref AppSecurityGroup
+    Export:
+      Name: !Sub "${Environment}-AlbSecurityGroupId"
+```
+
+Essential Intrinsic Functions:
+* `!Ref`           : Returns value of parameter or physical ID of resource.
+* `!GetAtt`        : Retrieves attribute from resource (e.g. `!GetAtt MyALB.DNSName`).
+* `!Sub`           : Substitutes variables in string (e.g. `!Sub "app-${AWS::Region}.internal"`).
+* `!Join`          : Concatenates list of values with a delimiter.
+* `!ImportValue`   : Imports output value exported by another cross-stack template.
+
+Stack Operations:
+* Change Sets      : Preview changes before applying them (prevents accidental resource recreation/deletion).
+* Drift Detection  : Detects when resources are modified out-of-band via AWS Console or CLI.
+* Rollback Triggers: Automatically rolls back stack update if CloudWatch alarms breach thresholds.
+
+
+--------------------------------------------------------------------------------
+6. ESSENTIAL AWS CLI COMMANDS
+--------------------------------------------------------------------------------
+
+EC2 & VPC:
+  aws ec2 describe-instances --filters "Name=instance-state-name,Values=running"
+  aws ec2 describe-vpcs --vpc-ids vpc-0123456789abcdef0
+  aws ec2 describe-subnets --filters "Name=vpc-id,Values=vpc-0123456789abcdef0"
+  aws ec2 describe-security-groups --group-ids sg-0123456789abcdef0
+
+S3 & Storage:
+  aws s3 ls
+  aws s3 sync ./dist/ s3://my-frontend-bucket/ --delete
+  aws s3 cp backup.tar.gz s3://my-backup-bucket/daily/ --storage-class GLACIER
+  aws s3api get-bucket-policy --bucket my-frontend-bucket
+
+IAM & STS:
+  aws sts get-caller-identity
+  aws iam list-roles --query "Roles[?contains(RoleName, 'EKS')].RoleName"
+  aws sts assume-role --role-arn arn:aws:iam::123456789012:role/DeployerRole --role-session-name ci-session
+
+CloudFormation:
+  aws cloudformation create-stack --stack-name prod-vpc --template-body file://vpc.yaml --parameters ParameterKey=Env,ParameterValue=prod
+  aws cloudformation describe-stacks --stack-name prod-vpc --query "Stacks[0].StackStatus"
+  aws cloudformation detect-stack-drift --stack-name prod-vpc
+
+
+--------------------------------------------------------------------------------
+7. PRODUCTION INCIDENT RUNBOOKS & TRIAGE
+--------------------------------------------------------------------------------
+
+Scenario A: EC2 Instance Fails "Status Checks"
+1. Check Status Check types:
+   - System Status Check Failed: Hardware, power, or physical host issue on AWS side.
+     Fix: Stop and Start the instance (migrates VM to a healthy physical hypervisor host).
+   - Instance Status Check Failed: OS kernel panic, corrupted file system, exhausted memory, 
+     or misconfigured network interface inside the VM.
+     Fix: Check EC2 System Log (`aws ec2 get-console-output --instance-id <id>`), create AMI/snapshot, 
+     and inspect root volume attached to a rescue instance.
+
+Scenario B: "Access Denied" (403) on S3 Operations
+Triage Checklist:
+1. Verify caller identity: `aws sts get-caller-identity`
+2. Check IAM Identity Policy (Does user/role have `s3:GetObject` and `s3:ListBucket`?).
+3. Check S3 Bucket Policy (Is there an explicit Deny on non-TLS or IP addresses?).
+4. Check S3 Block Public Access settings on account and bucket level.
+5. Check KMS Permissions (If SSE-KMS encrypted, caller must have `kms:Decrypt` on KMS key).
+6. Check AWS Organizations Service Control Policy (SCP) blocking region or S3 action.

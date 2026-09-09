@@ -1,0 +1,148 @@
+================================================================================
+         SELF-HOSTED GITLAB ADMINISTRATION & RUNNERS INTERVIEW CHEAT SHEET
+================================================================================
+
+Self-Hosted GitLab (Community Edition / Enterprise Edition) provides an end-to-end 
+DevOps platform on private infrastructure. Senior interviews cover internal component 
+architecture, GitLab Runner autoscaling on Kubernetes, RBAC governance, and backup/restore 
+disaster recovery procedures.
+
+
+--------------------------------------------------------------------------------
+1. SELF-HOSTED GITLAB INTERNAL ARCHITECTURE
+--------------------------------------------------------------------------------
+
+GitLab Core Daemon Subsystems:
+```text
+                  Incoming HTTP / SSH Requests
+                                │
+          ┌─────────────────────┴─────────────────────┐
+          ▼                                           ▼
+[ GitLab Workhorse (Go) ]                     [ GitLab Shell (Go) ]
+  - Reverse proxy; handles Git HTTP,            - Handles Git over SSH;
+    file uploads, raw blob downloads              authenticates SSH keys
+          │                                           │
+          ▼                                           │
+    [ Puma (Ruby) ]                                   │
+      - Application web server;                       │
+        renders UI, API requests                      │
+          │                                           │
+          ├─────────────────────┬─────────────────────┘
+          ▼                     ▼
+    [ PostgreSQL ]        [ Gitaly (Go) ]
+      - Metadata, users,    - Git RPC storage engine;
+        MRs, pipeline info    manages bare .git repos
+          │
+          ▼
+   [ Redis + Sidekiq ]
+     - Cache & async background
+       job processing engine
+```
+
+Component Summary:
+* **GitLab Workhorse:** Lightweight reverse proxy in Go; handles large data transfers 
+  (Git push/pull over HTTP, archive downloads) to free up Puma workers.
+* **Puma:** Fast, multi-threaded Ruby application server hosting the GitLab Web UI and API.
+* **Gitaly:** Dedicated RPC service providing high-performance access to Git repositories on disk.
+* **Sidekiq:** Asynchronous background job processor (schedules CI jobs, sends notification emails).
+* **PostgreSQL:** Relational database storing user records, permissions, issues, and merge requests.
+* **Redis:** In-memory store for UI session caching and Sidekiq background job queues.
+
+
+--------------------------------------------------------------------------------
+2. GITLAB RUNNER ARCHITECTURE & AUTOSCALING
+--------------------------------------------------------------------------------
+
+Runner Scope Tiers:
+* **Shared Runners**  : Available to every project across the entire GitLab instance.
+* **Group Runners**   : Available to all sub-groups and repositories within a specific group.
+* **Specific Runners**: Dedicated strictly to a single project (for custom hardware or high security).
+
+Executors Comparison:
+| Executor | How it Works | Isolation | Autoscaling Support |
+| :--- | :--- | :--- | :--- |
+| **Shell** | Runs scripts directly on the host machine | ❌ None (Shared host environment) | ❌ Manual |
+| **Docker** | Spawns clean Docker container per job | ✅ Container isolation | ❌ Static worker pool |
+| **Kubernetes**| Dynamically creates ephemeral Pod for each job | ✅ Pod-level isolation | ✅ **Fully Autoscaling** |
+
+Kubernetes Runner Autoscaling Flow:
+1. GitLab Runner Manager Pod runs inside the K8s cluster.
+2. Manager polls GitLab Server for pending CI/CD jobs.
+3. Upon receiving a job, it calls the Kubernetes API to provision an **ephemeral Pod**.
+4. The Pod runs the build steps in a custom container image.
+5. Build artifacts are uploaded back to GitLab, and the Pod is immediately terminated.
+
+
+--------------------------------------------------------------------------------
+3. GITLAB CI/CD: CACHE VS ARTIFACTS
+--------------------------------------------------------------------------------
+
+| Feature | `cache:` | `artifacts:` |
+| :--- | :--- | :--- |
+| **Purpose** | Speeds up build time between pipeline runs | Passes output files from one stage to another |
+| **Typical Data** | Dependencies (`node_modules/`, `.m2/repository/`)| Compiled binaries, `.jar`, `.war`, test reports |
+| **Persistence** | May be purged/evicted at any time; never guarantee existence | Guaranteed to exist for specified duration (`expire_in`) |
+| **Cross-Pipeline**| Shared across multiple pipelines on the same branch | Scoped strictly to the pipeline execution |
+| **Downloadable** | No (Internal runner storage / S3 bucket) | Yes (Downloadable directly from GitLab UI) |
+
+
+--------------------------------------------------------------------------------
+4. RBAC, ACCESS CONTROL & GOVERNANCE
+--------------------------------------------------------------------------------
+
+GitLab Role Hierarchy:
+1. **Guest (10)**     : Read-only access to public issues and comments.
+2. **Reporter (20)**  : Can view and pull code; cannot push commits or trigger builds.
+3. **Developer (30)** : Can push to unprotected branches, trigger CI/CD pipelines, and create MRs.
+4. **Maintainer (40)**: Can push/merge to protected branches, configure project integrations and runners.
+5. **Owner (50)**     : Full control; can transfer ownership, delete group/project, manage billing.
+
+
+--------------------------------------------------------------------------------
+5. BACKUP, RESTORE & DISASTER RECOVERY
+--------------------------------------------------------------------------------
+
+Creating an Instance Backup:
+```bash
+sudo gitlab-backup create
+```
+* Generates a timestamped archive (e.g. `1694200000_2026_09_09_gitlab_backup.tar`) in 
+  `/var/opt/gitlab/backups/`.
+
+THE #1 CRITICAL INTERVIEW TRAP (Secret Encryption Key):
+`gitlab-backup create` DOES NOT backup `/etc/gitlab/gitlab-secrets.json` or `/etc/gitlab/gitlab.rb`!
+* **Why this matters:** `gitlab-secrets.json` contains the database encryption keys for 
+  CI/CD variables, two-factor authentication tokens, and user credentials.
+* **Failure mode:** If you restore a database backup onto a new server without the matching 
+  `gitlab-secrets.json`, all encrypted CI/CD secrets and SSH keys will be permanently corrupted!
+* **Best Practice:** Automate daily synchronization of the backup tar file AND `/etc/gitlab/` 
+  to an offsite S3 or Cloudflare R2 bucket.
+
+
+--------------------------------------------------------------------------------
+6. GITLAB CI VS JENKINS VS GITHUB ACTIONS
+--------------------------------------------------------------------------------
+
+| Capability | GitLab CI | Jenkins | GitHub Actions |
+| :--- | :--- | :--- | :--- |
+| **Hosting Model** | Integrated or Self-Hosted | Self-Hosted Controller/Agents | Cloud (GitHub-hosted) or Self-Hosted |
+| **Configuration** | Single `.gitlab-ci.yml` in repo | `Jenkinsfile` / Groovy Shared Libs | Workflow `.github/workflows/*.yaml` |
+| **Ecosystem** | Built-in Git, Container Registry, CI | Extensible via 1,800+ plugins | Massive marketplace of actions |
+| **Maintenance** | Low (Single packaged omnibus stack) | High (Plugin dependency matrix) | Zero (for GitHub cloud SaaS) |
+
+
+--------------------------------------------------------------------------------
+7. ESSENTIAL GITLAB ADMINISTRATIVE COMMANDS
+--------------------------------------------------------------------------------
+
+Service Management (Omnibus):
+  sudo gitlab-ctl status                  # Check health of all internal daemons
+  sudo gitlab-ctl reconfigure             # Apply updates from /etc/gitlab/gitlab.rb
+  sudo gitlab-ctl restart puma            # Restart web application server
+  sudo gitlab-ctl restart sidekiq         # Restart background job workers
+  sudo gitlab-ctl tail gitaly             # Stream live Gitaly storage logs
+
+Runner Management:
+  sudo gitlab-runner register             # Interactively registers runner with GitLab token
+  sudo gitlab-runner list                 # Lists all runners configured in config.toml
+  sudo gitlab-runner verify               # Verifies connection to GitLab server

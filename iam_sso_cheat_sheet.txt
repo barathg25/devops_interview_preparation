@@ -1,0 +1,201 @@
+================================================================================
+        ENTERPRISE IDENTITY, SSO & CLOUD IAM COMPLETE INTERVIEW CHEAT SHEET
+================================================================================
+
+Identity and Access Management (IAM) and Single Sign-On (SSO) govern security 
+boundaries across developer infrastructure. In senior interviews, discussions focus 
+on federated identity (Microsoft Entra ID / Azure AD), protocol mechanics (SAML vs OIDC), 
+RBAC mapping across DevOps toolchains (Jenkins, ArgoCD, GitLab), and cloud token exchange 
+(AWS STS & EKS IRSA).
+
+
+--------------------------------------------------------------------------------
+1. CORE IDENTITY PROTOCOLS: OIDC VS SAML 2.0
+--------------------------------------------------------------------------------
+
+| Feature | OpenID Connect (OIDC) | SAML 2.0 |
+| :--- | :--- | :--- |
+| **Foundation** | Built on top of OAuth 2.0 | XML framework (OASIS standard) |
+| **Data Format** | JSON / JSON Web Tokens (JWT) | Verbose XML documents & assertions |
+| **Token Types** | `id_token` (identity) & `access_token` (API) | SAML Assertion (AuthN & Attributes) |
+| **Transport** | RESTful HTTP headers & JSON payloads | HTTP POST binding / Redirect |
+| **Adoption** | Modern cloud-native apps (ArgoCD, K8s) | Traditional enterprise & legacy systems |
+| **Performance** | Lightweight, easily parsed by mobile/web | Heavy XML parsing overhead |
+
+One-Line Definitions:
+* **Authentication (AuthN):** Verifying *who you are* (Login credentials, MFA).
+* **Authorization (AuthZ):** Verifying *what you are permitted to do* (RBAC permissions).
+* **Identity Provider (IdP):** Holds user database and issues credentials (Microsoft Entra ID).
+* **Service Provider (SP / Relying Party):** Application delegating login to IdP (Jenkins, ArgoCD).
+
+
+--------------------------------------------------------------------------------
+2. MICROSOFT ENTRA ID (AZURE AD) ENTERPRISE INTEGRATION
+--------------------------------------------------------------------------------
+
+Core Entra ID Concepts:
+* **Tenant ID**      : Globally unique GUID representing your organization's Azure directory.
+* **App Registration**: Defines your app's identity in Entra ID (generates `Application/Client ID` 
+                       and `Client Secret` or Certificate).
+* **Redirect URI**    : The exact callback URL where Entra ID returns authorization codes and tokens.
+* **Group Claims**    : Emits the user's Active Directory security group Object IDs (GUIDs) inside 
+                       the JWT `id_token` so downstream tools can enforce role mapping.
+
+
+--------------------------------------------------------------------------------
+3. TOOLCHAIN SSO INTEGRATION BLUEPRINTS
+--------------------------------------------------------------------------------
+
+A. Argo CD SSO with Microsoft Entra ID (Dex OIDC Connector):
+
+1. Configure `argocd-cm` ConfigMap:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+data:
+  url: https://argocd.company.com
+  dex.config: |
+    connectors:
+      - type: oidc
+        id: azure
+        name: Microsoft Entra ID
+        config:
+          issuer: https://login.microsoftonline.com/<AZURE_TENANT_ID>/v2.0
+          clientID: <AZURE_CLIENT_ID>
+          clientSecret: $oidc.azure.clientSecret
+          redirectURI: https://argocd.company.com/api/dex/callback
+          requestedScopes: ["openid", "profile", "email", "groups"]
+```
+
+2. Configure RBAC Group Mapping in `argocd-rbac-cm`:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.default: role:readonly
+  policy.csv: |
+    # Map Entra ID DevOps Admin Group GUID to ArgoCD admin
+    g, "a1b2c3d4-e5f6-7890-abcd-111111111111", role:admin
+    # Map Developer Group GUID to custom developer role
+    g, "b2c3d4e5-f6a7-8901-bcde-222222222222", role:developer
+```
+
+B. Jenkins SSO with Microsoft Entra ID:
+* Install the official **Azure AD Plugin** (`azure-ad`).
+* In "Configure Global Security", select Security Realm: **Azure Active Directory**.
+* Provide Client ID, Client Secret, and Tenant ID.
+* Configure Authorization: Use **Matrix-based security** or **Role-based Authorization Strategy**.
+* Add the Azure AD Security Group Object ID to the matrix and grant explicit permissions:
+  - Admin Group: Full Administration rights (`Overall/Administer`).
+  - Dev Group: `Overall/Read`, `Job/Build`, `Job/Read`, `Job/Workspace`.
+
+C. Self-Hosted GitLab SSO with Microsoft Entra ID:
+* Add OmniAuth provider configuration in `/etc/gitlab/gitlab.rb`:
+```ruby
+gitlab_rails['omniauth_enabled'] = true
+gitlab_rails['omniauth_allow_single_sign_on'] = ['azure_activedirectory_v2']
+gitlab_rails['omniauth_block_auto_created_users'] = false
+gitlab_rails['omniauth_providers'] = [
+  {
+    name: "azure_activedirectory_v2",
+    label: "Company Microsoft Login",
+    args: {
+      client_id: "<AZURE_CLIENT_ID>",
+      client_secret: "<AZURE_CLIENT_SECRET>",
+      tenant_id: "<AZURE_TENANT_ID>"
+    }
+  }
+]
+```
+
+
+--------------------------------------------------------------------------------
+4. AWS IAM DEEP DIVE: STS & EKS IRSA
+--------------------------------------------------------------------------------
+
+AWS STS `AssumeRole`:
+Temporary security credentials (Access Key ID, Secret Access Key, Session Token) 
+valid for 15 minutes to 12 hours. Used for cross-account deployments:
+```bash
+aws sts assume-role \
+  --role-arn "arn:aws:iam::123456789012:role/ProductionDeployerRole" \
+  --role-session-name "JenkinsDeploySession"
+```
+
+IAM Roles for Service Accounts (IRSA) in EKS:
+The gold standard for Kubernetes pod authentication against AWS resources (S3, DynamoDB):
+
+```text
+[ Pod with ServiceAccount ]
+           │
+           ▼ (EKS injects OIDC web identity token & AWS_ROLE_ARN)
+[ AWS SDK calls sts:AssumeRoleWithWebIdentity ]
+           │
+           ▼ (AWS IAM verifies token against EKS OIDC Identity Provider)
+[ Temporary AWS Credentials Returned to Pod ]
+```
+
+Why IRSA Replaced Node IAM Roles:
+* **Security Risk of Node Roles:** Every Pod on the node inherits the node's IAM role 
+  (violates principle of least privilege).
+* **IRSA Principle:** Restricts IAM permissions strictly to individual ServiceAccounts 
+  and Pods, with zero access for unauthorized neighbor pods on the same node.
+
+Configuring IRSA:
+1. Enable IAM OIDC Provider for your EKS cluster:
+   `eksctl utils associate-iam-oidc-provider --cluster prod-cluster --approve`
+2. Create IAM Role with Trust Policy referencing the OIDC provider:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:sub": "system:serviceaccount:production:payment-sa"
+        }
+      }
+    }
+  ]
+}
+```
+3. Annotate the Kubernetes ServiceAccount:
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-sa
+  namespace: production
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/PaymentServiceS3AccessRole
+```
+
+
+--------------------------------------------------------------------------------
+5. HIGH-FREQUENCY INTERVIEW DISTINCTIONS & SECURITY TRAPS
+--------------------------------------------------------------------------------
+
+1. The "Confused Deputy" Problem:
+   * Occurs when a third-party service (deputy) is coerced into accessing customer resources.
+   * Fix: Use an **External ID** (`sts:ExternalId` condition) in cross-account IAM trust policies.
+
+2. Permission Boundary vs IAM Policy:
+   * IAM Policy defines what an identity CAN do.
+   * Permission Boundary defines the MAXIMUM permissions an identity CAN EVER have.
+   * Even if a developer creates a role with `AdministratorAccess`, the boundary limits it 
+     (e.g., cannot touch billing or security logging).
+
+3. Access Tokens vs ID Tokens:
+   * **ID Token (JWT):** For client-side consumption; contains user identity attributes (claims).
+   * **Access Token (Opaque or JWT):** Sent to resource APIs to authorize specific actions/scopes.

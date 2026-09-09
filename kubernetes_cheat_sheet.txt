@@ -193,4 +193,37 @@ Q6: Are Control Plane components installed as systemd services?
   - In managed cloud setups (AWS EKS, Azure AKS, GCP GKE), the cloud provider manages 
     and hides the control-plane nodes entirely.
 
+
+--------------------------------------------------------------------------------
+6. AWS EKS PRODUCTION ARCHITECTURE (SENIOR DEVOPS INTERVIEW FOCUS)
+--------------------------------------------------------------------------------
+
+1. EKS Architecture Components:
+   * **Managed Control Plane:** AWS runs high-availability API servers and etcd across 
+     3 Availability Zones. AWS guarantees 99.95% uptime SLA.
+   * **Worker Node Options:**
+     - **Managed Node Groups:** AWS manages EC2 AMI updates, provisioning, and drain/cordon.
+     - **Self-Managed Nodes:** Custom AMIs and specialized OS configurations.
+     - **AWS Fargate:** Serverless compute; run Pods without managing underlying EC2 VMs.
+     - **Karpenter:** Next-gen high-performance cluster autoscaler that provisions right-sized 
+       EC2 instances directly in seconds without ASG overhead.
+
+2. AWS VPC CNI (Container Network Interface):
+   * Unlike flannel or Calico overlay networks, AWS VPC CNI assigns **real secondary private 
+     VPC IP addresses** directly from your VPC subnet to each Kubernetes Pod.
+   * Enables Pods to communicate directly with AWS RDS, EC2, and on-premises resources 
+     at native VPC network speeds without SNAT performance bottlenecks.
+
+3. AWS Load Balancer Controller & TargetGroupBinding:
+   * Replaces legacy in-tree cloud provider load balancers.
+   * Automatically creates AWS Application Load Balancers (ALBs) from Ingress resources 
+     and Network Load Balancers (NLBs) from Service type LoadBalancer.
+   * **IP Target Mode (Direct Pod Routing):**
+     Routes traffic directly from ALB into Pod IP addresses without passing through 
+     NodePort and `kube-proxy` iptables (eliminates extra network hops and preserves latency).
+
+4. EKS Persistent Storage with CSI Drivers:
+   * **EBS CSI Driver:** Provisions persistent EBS volumes (`gp3`). Requires an IAM role via IRSA.
+   * **EFS CSI Driver:** Mounts managed NFS across multiple pods across different AZs (`ReadWriteMany`).
+
 ================================================================================

@@ -1,0 +1,13 @@
+# JetBrains IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Temporary & scratch files
+*.tmp
+*.bak
